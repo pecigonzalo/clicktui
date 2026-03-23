@@ -34,7 +34,7 @@ func TestDetailLabel_LongString_NoTruncation(t *testing.T) {
 // ── sectionHeader ─────────────────────────────────────────────────────────────
 
 func TestSectionHeader_ContainsTitle(t *testing.T) {
-	got := sectionHeader("Dates")
+	got := sectionHeader("Dates", "")
 	stripped := stripTviewTags(got)
 	if !strings.Contains(stripped, "Dates") {
 		t.Errorf("sectionHeader('Dates') stripped = %q, expected 'Dates'", stripped)
@@ -44,7 +44,7 @@ func TestSectionHeader_ContainsTitle(t *testing.T) {
 	}
 }
 
-// ── statusBadge / priorityBadge ───────────────────────────────────────────────
+// ── statusBadge / statusBadgeColored / priorityBadge ─────────────────────────
 
 func TestStatusBadge_ContainsStatus(t *testing.T) {
 	got := statusBadge("in progress")
@@ -54,6 +54,28 @@ func TestStatusBadge_ContainsStatus(t *testing.T) {
 	}
 	if !strings.Contains(stripped, "●") {
 		t.Errorf("statusBadge stripped = %q, expected dot '●'", stripped)
+	}
+}
+
+func TestStatusBadgeColored_UsesHexColor(t *testing.T) {
+	got := statusBadgeColored("in progress", "#1e90ff")
+	// The result should contain the hex colour tag.
+	if !strings.Contains(got, "#1e90ff") {
+		t.Errorf("statusBadgeColored with hex color should contain hex tag; got = %q", got)
+	}
+	stripped := stripTviewTags(got)
+	if !strings.Contains(stripped, "in progress") {
+		t.Errorf("statusBadgeColored stripped = %q, expected 'in progress'", stripped)
+	}
+}
+
+func TestStatusBadgeColored_FallsBackOnEmpty(t *testing.T) {
+	got := statusBadgeColored("open", "")
+	// Should fall back to ColorBadgeStatus (aqua) — not contain a hex color tag
+	// for the empty input. Just verify it contains the status text.
+	stripped := stripTviewTags(got)
+	if !strings.Contains(stripped, "open") {
+		t.Errorf("statusBadgeColored fallback stripped = %q, expected 'open'", stripped)
 	}
 }
 
@@ -169,24 +191,146 @@ func TestRender_NoSubtasks_NoSection(t *testing.T) {
 	}
 }
 
-// ── render: action hints ─────────────────────────────────────────────────────
+// ── sectionHeader with icon ───────────────────────────────────────────────────
 
-func TestRender_ActionHints_StatusOnly(t *testing.T) {
+func TestSectionHeader_WithIcon(t *testing.T) {
+	got := sectionHeader("Dates", "CAL")
+	stripped := stripTviewTags(got)
+	if !strings.Contains(stripped, "CAL Dates") {
+		t.Errorf("sectionHeader with icon stripped = %q, expected 'CAL Dates'", stripped)
+	}
+	// Should NOT contain the "── " prefix when icon is present.
+	if strings.HasPrefix(stripped, "── ") {
+		t.Errorf("sectionHeader with icon should not start with dash prefix; stripped = %q", stripped)
+	}
+}
+
+func TestSectionHeader_WithoutIcon(t *testing.T) {
+	got := sectionHeader("Dates", "")
+	stripped := stripTviewTags(got)
+	if !strings.HasPrefix(stripped, "── ") {
+		t.Errorf("sectionHeader without icon should start with '── '; stripped = %q", stripped)
+	}
+}
+
+// ── render: location breadcrumb ──────────────────────────────────────────────
+
+func TestRender_LocationBreadcrumb(t *testing.T) {
+	tdp := newTestDetailPane()
+	tdp.render(&app.TaskDetail{
+		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
+		Space: "Engineering", Folder: "Sprint 23", List: "Current Sprint",
+	})
+	stripped := stripTviewTags(tdp.GetText(false))
+	// Should contain breadcrumb with separator, not separate rows.
+	if !strings.Contains(stripped, "Engineering") {
+		t.Errorf("render() missing Space in breadcrumb; stripped = %q", stripped)
+	}
+	if !strings.Contains(stripped, "Sprint 23") {
+		t.Errorf("render() missing Folder in breadcrumb; stripped = %q", stripped)
+	}
+	if !strings.Contains(stripped, "Current Sprint") {
+		t.Errorf("render() missing List in breadcrumb; stripped = %q", stripped)
+	}
+	// Should NOT have separate "Space", "Folder", "List" labels.
+	if strings.Contains(stripped, "Space ") && strings.Contains(stripped, "Folder ") {
+		t.Errorf("render() should use breadcrumb, not separate rows; stripped = %q", stripped)
+	}
+}
+
+func TestRender_LocationBreadcrumb_SkipsEmpty(t *testing.T) {
+	tdp := newTestDetailPane()
+	tdp.render(&app.TaskDetail{
+		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
+		Space: "Engineering", Folder: "", List: "Current Sprint",
+	})
+	stripped := stripTviewTags(tdp.GetText(false))
+	// Empty folder should be omitted from breadcrumb.
+	if !strings.Contains(stripped, "Engineering") {
+		t.Errorf("render() missing Space in breadcrumb; stripped = %q", stripped)
+	}
+	if !strings.Contains(stripped, "Current Sprint") {
+		t.Errorf("render() missing List in breadcrumb; stripped = %q", stripped)
+	}
+}
+
+// ── render: description gutter ───────────────────────────────────────────────
+
+func TestRender_DescriptionGutter(t *testing.T) {
+	tdp := newTestDetailPane()
+	tdp.render(&app.TaskDetail{
+		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
+		Space: "S", Folder: "F", List: "L",
+		Description: "Line one\nLine two",
+	})
+	stripped := stripTviewTags(tdp.GetText(false))
+	// Each description line should be prefixed with a gutter character.
+	if !strings.Contains(stripped, "│ Line one") {
+		t.Errorf("render() description missing gutter for line 1; stripped = %q", stripped)
+	}
+	if !strings.Contains(stripped, "│ Line two") {
+		t.Errorf("render() description missing gutter for line 2; stripped = %q", stripped)
+	}
+}
+
+// ── render: dates section ────────────────────────────────────────────────────
+
+func TestRender_DatesSection_SecondaryLine(t *testing.T) {
+	tdp := newTestDetailPane()
+	tdp.render(&app.TaskDetail{
+		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
+		Space: "S", Folder: "F", List: "L",
+		DueDate: "2024-01-15", StartDate: "2024-01-10",
+		DateCreated: "2024-01-05", DateUpdated: "2024-01-14",
+	})
+	stripped := stripTviewTags(tdp.GetText(false))
+	// Primary dates should be on their own labeled rows.
+	if !strings.Contains(stripped, "Due") || !strings.Contains(stripped, "2024-01-15") {
+		t.Errorf("render() missing due date; stripped = %q", stripped)
+	}
+	if !strings.Contains(stripped, "Start") || !strings.Contains(stripped, "2024-01-10") {
+		t.Errorf("render() missing start date; stripped = %q", stripped)
+	}
+	// Secondary dates should be on one muted line with · separator.
+	if !strings.Contains(stripped, "Created 2024-01-05") {
+		t.Errorf("render() missing created date on secondary line; stripped = %q", stripped)
+	}
+	if !strings.Contains(stripped, "Updated 2024-01-14") {
+		t.Errorf("render() missing updated date on secondary line; stripped = %q", stripped)
+	}
+	if !strings.Contains(stripped, "·") {
+		t.Errorf("render() missing · separator between created/updated; stripped = %q", stripped)
+	}
+}
+
+// ── render: status uses StatusColor ──────────────────────────────────────────
+
+func TestRender_StatusUsesColor(t *testing.T) {
+	tdp := newTestDetailPane()
+	tdp.render(&app.TaskDetail{
+		ID: "task1", Name: "Test", Status: "in progress", StatusColor: "#ff6600",
+		Priority: "normal", Space: "S", Folder: "F", List: "L",
+	})
+	text := tdp.GetText(false)
+	// The rendered text should contain the hex colour from StatusColor.
+	if !strings.Contains(text, "#ff6600") {
+		t.Errorf("render() should use StatusColor hex in output; text = %q", text)
+	}
+}
+
+// ── render: action hints removed from body ──────────────────────────────────
+
+func TestRender_NoActionHints(t *testing.T) {
 	tdp := newTestDetailPane()
 	tdp.render(&app.TaskDetail{
 		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
 		Space: "S", Folder: "F", List: "L",
 	})
 	stripped := stripTviewTags(tdp.GetText(false))
-	// tview-escaped [[]s] strips to "s] update status".
-	if !strings.Contains(stripped, "s] update status") {
-		t.Errorf("render() missing status hint; stripped = %q", stripped)
-	}
-	if strings.Contains(stripped, "p] go to parent") {
-		t.Errorf("render() should not show parent hint")
-	}
-	if strings.Contains(stripped, "1-N] open subtask") {
-		t.Errorf("render() should not show subtask hint")
+	// Action hints were moved to the global footer; they should not appear in
+	// the rendered detail body.
+	if strings.Contains(stripped, "update status") {
+		t.Errorf("render() should not contain action hints in body; stripped = %q", stripped)
 	}
 }
 

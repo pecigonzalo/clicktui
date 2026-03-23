@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -237,9 +238,15 @@ func detailLabel(s string) string {
 }
 
 // sectionHeader returns a tview-formatted section divider line.
-// Format:  "── Title ──────────────"  (muted colour, consistent weight)
-func sectionHeader(title string) string {
-	left := "── "
+// When icon is non-empty the format is:  "icon Title ────────────"
+// When icon is empty:                    "── Title ──────────────"
+func sectionHeader(title, icon string) string {
+	var left string
+	if icon != "" {
+		left = icon + " "
+	} else {
+		left = "── "
+	}
 	right := " " + strings.Repeat("─", 28)
 	return tagColor(ColorTextMuted) + left + title + right + "[-]"
 }
@@ -247,6 +254,13 @@ func sectionHeader(title string) string {
 // statusBadge returns a styled inline badge for a status string.
 func statusBadge(status string) string {
 	return tagColor(ColorBadgeStatus) + icons.StatusDot + " " + tview.Escape(status) + "[-]"
+}
+
+// statusBadgeColored returns a styled inline badge using the API-provided hex
+// color. Falls back to ColorBadgeStatus when hexColor is empty or invalid.
+func statusBadgeColored(status, hexColor string) string {
+	c := statusDotColor(hexColor, "")
+	return tagColor(c) + icons.StatusDot + " " + tview.Escape(status) + "[-]"
 }
 
 // priorityBadge returns a styled inline badge for a priority string.
@@ -304,22 +318,29 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 	b.WriteString(idLine + "\n\n")
 
 	// ── Status & Priority badges ─────────────────────────────────────────────
-	// Rendered side by side on one line for quick at-a-glance scanning.
-	b.WriteString(detailLabel("Status") + "  " + statusBadge(d.Status) + "\n")
+	b.WriteString(detailLabel("Status") + "  " + statusBadgeColored(d.Status, d.StatusColor) + "\n")
 	b.WriteString(detailLabel("Priority") + "  " + priorityBadge(d.Priority) + "\n")
 
 	// ── People & Tags ────────────────────────────────────────────────────────
 	if len(d.Assignees) > 0 || len(d.Tags) > 0 {
 		b.WriteString("\n")
 		if len(d.Assignees) > 0 {
+			label := "Assignees"
+			if icons.Assignee != "" {
+				label = icons.Assignee + " " + label
+			}
 			fmt.Fprintf(&b, "%s  %s%s[-]\n",
-				detailLabel("Assignees"),
+				detailLabel(label),
 				tagColor(ColorDetailValue),
 				tview.Escape(strings.Join(d.Assignees, ", ")))
 		}
 		if len(d.Tags) > 0 {
+			label := "Tags"
+			if icons.Tag != "" {
+				label = icons.Tag + " " + label
+			}
 			fmt.Fprintf(&b, "%s  %s%s[-]\n",
-				detailLabel("Tags"),
+				detailLabel(label),
 				tagColor(ColorDetailValue),
 				tview.Escape(strings.Join(d.Tags, ", ")))
 		}
@@ -328,26 +349,58 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 	// ── Dates ────────────────────────────────────────────────────────────────
 	hasDates := d.DueDate != "" || d.StartDate != "" || d.DateCreated != "" || d.DateUpdated != ""
 	if hasDates {
-		b.WriteString("\n" + sectionHeader("Dates") + "\n")
+		b.WriteString("\n" + sectionHeader("Dates", icons.Calendar) + "\n")
+
+		// Primary dates: Due and Start on their own rows.
 		if d.DueDate != "" {
-			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Due"), tagColor(ColorDetailValue), d.DueDate)
+			dueDateColor := tagColor(ColorDetailValue)
+			if t, err := time.Parse(time.DateOnly, d.DueDate); err == nil {
+				today := time.Now().Truncate(24 * time.Hour)
+				switch {
+				case t.Before(today):
+					dueDateColor = tagColor(ColorStatusError) // overdue → red
+				case t.Equal(today):
+					dueDateColor = tagColor(ColorStatusLoading) // today → yellow
+				}
+			}
+			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Due"), dueDateColor, d.DueDate)
 		}
 		if d.StartDate != "" {
 			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Start"), tagColor(ColorDetailValue), d.StartDate)
 		}
-		if d.DateCreated != "" {
-			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Created"), tagColor(ColorDetailValue), d.DateCreated)
-		}
-		if d.DateUpdated != "" {
-			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Updated"), tagColor(ColorDetailValue), d.DateUpdated)
+
+		// Secondary dates: Created/Updated on a single muted line.
+		if d.DateCreated != "" || d.DateUpdated != "" {
+			b.WriteString("\n")
+			muted := tagColor(ColorTextMuted)
+			var parts []string
+			if d.DateCreated != "" {
+				parts = append(parts, "Created "+d.DateCreated)
+			}
+			if d.DateUpdated != "" {
+				parts = append(parts, "Updated "+d.DateUpdated)
+			}
+			fmt.Fprintf(&b, "%s%s[-]\n", muted, strings.Join(parts, "  ·  "))
 		}
 	}
 
 	// ── Location ─────────────────────────────────────────────────────────────
-	b.WriteString("\n" + sectionHeader("Location") + "\n")
-	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Space"), tagColor(ColorDetailValue), tview.Escape(d.Space))
-	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Folder"), tagColor(ColorDetailValue), tview.Escape(d.Folder))
-	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("List"), tagColor(ColorDetailValue), tview.Escape(d.List))
+	b.WriteString("\n" + sectionHeader("Location", icons.Location) + "\n")
+
+	// Compact breadcrumb: skip empty segments (e.g. hidden folder).
+	sep := " " + icons.Breadcrumb + " "
+	var segments []string
+	for _, seg := range []string{d.Space, d.Folder, d.List} {
+		if seg != "" {
+			segments = append(segments, tview.Escape(seg))
+		}
+	}
+	if len(segments) > 0 {
+		fmt.Fprintf(&b, "%s  %s%s[-]\n",
+			detailLabel(""),
+			tagColor(ColorDetailValue),
+			strings.Join(segments, sep))
+	}
 	if d.Parent != "" {
 		fmt.Fprintf(&b, "%s  %s%s %s[-]\n",
 			detailLabel("Parent"),
@@ -358,7 +411,7 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 
 	// ── Subtasks ─────────────────────────────────────────────────────────────
 	if len(d.Subtasks) > 0 {
-		b.WriteString("\n" + sectionHeader(fmt.Sprintf("Subtasks (%d)", len(d.Subtasks))) + "\n")
+		b.WriteString("\n" + sectionHeader(fmt.Sprintf("Subtasks (%d)", len(d.Subtasks)), icons.Subtask) + "\n")
 		for _, st := range d.Subtasks {
 			fmt.Fprintf(&b, "%s%s[-] %s%s[-]  %s  %s%s[-]\n",
 				tagColor(ColorDetailValue),
@@ -374,17 +427,21 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 	// ── URL ──────────────────────────────────────────────────────────────────
 	if d.URL != "" {
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("URL"), tagColor(ColorTextSubtle), d.URL)
+		label := "URL"
+		if icons.Link != "" {
+			label = icons.Link + " " + label
+		}
+		fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel(label), tagColor(ColorTextSubtle), d.URL)
 	}
 
 	// ── Description ──────────────────────────────────────────────────────────
 	if d.Description != "" {
-		b.WriteString("\n" + sectionHeader("Description") + "\n")
-		fmt.Fprintf(&b, "%s%s[-]\n", tagColor(ColorDetailValue), tview.Escape(d.Description))
+		b.WriteString("\n" + sectionHeader("Description", icons.Description) + "\n")
+		gutter := tagColor(ColorTextMuted) + "│" + "[-] "
+		for line := range strings.SplitSeq(tview.Escape(d.Description), "\n") {
+			fmt.Fprintf(&b, "%s%s%s[-]\n", gutter, tagColor(ColorDetailValue), line)
+		}
 	}
-
-	// ── Action hints ─────────────────────────────────────────────────────────
-	b.WriteString("\n" + tagColor(ColorTextSubtle) + "[[]s] update status" + "[-]")
 
 	td.SetText(b.String())
 	td.ScrollToBeginning()
