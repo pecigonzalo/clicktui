@@ -15,11 +15,11 @@ import (
 
 func TestDetailLabel_PadsToWidth(t *testing.T) {
 	label := detailLabel("Due")
-	// The label should be padded to at least 10 characters of visible text.
+	// The label should be padded to at least 12 characters of visible text.
 	// We strip tview tags before measuring.
 	stripped := stripTviewTags(label)
-	if len(stripped) < 10 {
-		t.Errorf("detailLabel('Due') stripped = %q (len %d), want at least 10", stripped, len(stripped))
+	if len(stripped) < 12 {
+		t.Errorf("detailLabel('Due') stripped = %q (len %d), want at least 12", stripped, len(stripped))
 	}
 }
 
@@ -199,17 +199,17 @@ func TestSectionHeader_WithIcon(t *testing.T) {
 	if !strings.Contains(stripped, "CAL Dates") {
 		t.Errorf("sectionHeader with icon stripped = %q, expected 'CAL Dates'", stripped)
 	}
-	// Should NOT contain the "── " prefix when icon is present.
-	if strings.HasPrefix(stripped, "── ") {
-		t.Errorf("sectionHeader with icon should not start with dash prefix; stripped = %q", stripped)
+	// Should start with the SectionCorner prefix.
+	if !strings.HasPrefix(stripped, icons.SectionCorner) {
+		t.Errorf("sectionHeader with icon should start with SectionCorner %q; stripped = %q", icons.SectionCorner, stripped)
 	}
 }
 
 func TestSectionHeader_WithoutIcon(t *testing.T) {
 	got := sectionHeader("Dates", "")
 	stripped := stripTviewTags(got)
-	if !strings.HasPrefix(stripped, "── ") {
-		t.Errorf("sectionHeader without icon should start with '── '; stripped = %q", stripped)
+	if !strings.HasPrefix(stripped, icons.SectionCorner) {
+		t.Errorf("sectionHeader without icon should start with SectionCorner %q; stripped = %q", icons.SectionCorner, stripped)
 	}
 }
 

@@ -68,6 +68,7 @@ func (tp *TreePane) SetSpaces(_ context.Context, workspaceID string, nodes []*ap
 		wsTreeNode.AddChild(child)
 	}
 	wsTreeNode.SetExpanded(true)
+	tp.updateNodeText(wsTreeNode, wsNode)
 	tp.root.AddChild(wsTreeNode)
 	tp.snapshotNodes()
 }
@@ -108,6 +109,7 @@ func (tp *TreePane) SetSpacesAndExpand(
 				spaceTreeNode.AddChild(child)
 			}
 			spaceTreeNode.SetExpanded(true)
+			tp.updateNodeText(spaceTreeNode, s)
 			tp.SetCurrentNode(spaceTreeNode)
 
 			// Update the tree title to show the space name.
@@ -117,6 +119,7 @@ func (tp *TreePane) SetSpacesAndExpand(
 		wsTreeNode.AddChild(spaceTreeNode)
 	}
 	wsTreeNode.SetExpanded(true)
+	tp.updateNodeText(wsTreeNode, wsNode)
 	tp.root.AddChild(wsTreeNode)
 	tp.snapshotNodes()
 }
@@ -153,6 +156,7 @@ func (tp *TreePane) onSelected(node *tview.TreeNode) {
 		tp.expandSpace(node, ref)
 	case app.NodeFolder:
 		node.SetExpanded(!node.IsExpanded())
+		tp.updateNodeText(node, ref)
 	case app.NodeList:
 		// Collapse all sibling branches so only the path to the selected
 		// list remains expanded. Skip when a filter is active — the filter
@@ -164,9 +168,21 @@ func (tp *TreePane) onSelected(node *tview.TreeNode) {
 	}
 }
 
+// updateNodeText refreshes a tree node's display text to reflect the current
+// expansion state. Folder nodes swap between open/closed icons.
+func (tp *TreePane) updateNodeText(node *tview.TreeNode, ref *app.HierarchyNode) {
+	sym := nodeKindSymbol(ref.Kind, node.IsExpanded())
+	text := sym + " " + ref.Name
+	if ref.Kind == app.NodeList {
+		text += " " + tagColor(ColorTextMuted) + "#" + ref.ID + "[-]"
+	}
+	node.SetText(text)
+}
+
 func (tp *TreePane) expandWorkspace(node *tview.TreeNode, ref *app.HierarchyNode) {
 	if ref.Loaded {
 		node.SetExpanded(!node.IsExpanded())
+		tp.updateNodeText(node, ref)
 		return
 	}
 
@@ -191,6 +207,7 @@ func (tp *TreePane) expandWorkspace(node *tview.TreeNode, ref *app.HierarchyNode
 				node.AddChild(child)
 			}
 			node.SetExpanded(true)
+			tp.updateNodeText(node, ref)
 			tp.app.footer.SetStatusReady("Ready")
 			tp.snapshotNodes()
 		})
@@ -200,6 +217,7 @@ func (tp *TreePane) expandWorkspace(node *tview.TreeNode, ref *app.HierarchyNode
 func (tp *TreePane) expandSpace(node *tview.TreeNode, ref *app.HierarchyNode) {
 	if ref.Loaded {
 		node.SetExpanded(!node.IsExpanded())
+		tp.updateNodeText(node, ref)
 		return
 	}
 
@@ -229,6 +247,7 @@ func (tp *TreePane) expandSpace(node *tview.TreeNode, ref *app.HierarchyNode) {
 				node.AddChild(child)
 			}
 			node.SetExpanded(true)
+			tp.updateNodeText(node, ref)
 			tp.app.footer.SetStatusReady("Ready")
 			tp.snapshotNodes()
 		})
@@ -317,6 +336,7 @@ func (tp *TreePane) buildSubtree(n *app.HierarchyNode) *tview.TreeNode {
 	// children, expand it so results are visible.
 	if len(n.Children) > 0 {
 		node.SetExpanded(true)
+		tp.updateNodeText(node, n)
 	}
 	return node
 }
@@ -327,7 +347,7 @@ func (tp *TreePane) buildSubtree(n *app.HierarchyNode) *tview.TreeNode {
 // For list nodes an additional muted "#ID" suffix is appended so users can
 // identify the correct ID to pass to the --list flag.
 func (tp *TreePane) makeTreeNode(n *app.HierarchyNode) *tview.TreeNode {
-	sym := nodeKindSymbol(n.Kind)
+	sym := nodeKindSymbol(n.Kind, false)
 	text := sym + " " + n.Name
 	if n.Kind == app.NodeList {
 		text += " " + tagColor(ColorTextMuted) + "#" + n.ID + "[-]"
@@ -375,10 +395,13 @@ func (tp *TreePane) findAncestors(node, target *tview.TreeNode, ancestors map[*t
 
 // collapseNonAncestors collapses every non-leaf node that is not in the
 // ancestors set. Ancestor nodes stay expanded so the selected node remains
-// visible.
+// visible. Node text is refreshed so folder icons reflect the collapsed state.
 func (tp *TreePane) collapseNonAncestors(node *tview.TreeNode, ancestors map[*tview.TreeNode]bool) {
 	if !ancestors[node] {
 		node.SetExpanded(false)
+		if ref, ok := node.GetReference().(*app.HierarchyNode); ok {
+			tp.updateNodeText(node, ref)
+		}
 		return
 	}
 	// This node is on the path to the selection — keep it expanded and

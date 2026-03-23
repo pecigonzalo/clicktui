@@ -149,10 +149,12 @@ func priorityColor(priority string) tcell.Color {
 // Icons holds all symbolic glyphs used across the TUI.
 type Icons struct {
 	// Tree node kinds
-	Workspace string
-	Space     string
-	Folder    string
-	List      string
+	Workspace    string
+	Space        string
+	Folder       string
+	FolderOpen   string // expanded folder (▾ or nf-fa-folder_open)
+	FolderClosed string // collapsed folder (▸ or nf-fa-folder)
+	List         string
 
 	// Status & priority
 	StatusDot      string
@@ -162,13 +164,14 @@ type Icons struct {
 	PriorityLow    string
 
 	// Detail pane sections
-	Calendar    string
-	Location    string
-	Description string
-	Subtask     string
-	Link        string
-	Assignee    string
-	Tag         string
+	Calendar      string
+	Location      string
+	Description   string
+	Subtask       string
+	Link          string
+	Assignee      string
+	Tag           string
+	SectionCorner string // "╭─" for nerd fonts, "──" for unicode
 
 	// Misc
 	SubtaskPrefix string // ↳ or arrow
@@ -180,6 +183,8 @@ var unicodeIcons = Icons{
 	Workspace:      "◉",
 	Space:          "◈",
 	Folder:         "▸",
+	FolderOpen:     "▾",
+	FolderClosed:   "▸",
 	List:           "≡",
 	StatusDot:      "●",
 	PriorityUrgent: "!!",
@@ -193,6 +198,7 @@ var unicodeIcons = Icons{
 	Link:           "",
 	Assignee:       "",
 	Tag:            "",
+	SectionCorner:  "──",
 	SubtaskPrefix:  "↳",
 	ParentPrefix:   "▸",
 	Breadcrumb:     "›",
@@ -201,7 +207,9 @@ var unicodeIcons = Icons{
 var nerdFontIcons = Icons{
 	Workspace:      "\U000f0c21", // 󰰡
 	Space:          "\uf0ac",     //  nf-fa-globe
-	Folder:         "\uf07c",     //  nf-fa-folder_open
+	Folder:         "\uf07c",     //  nf-fa-folder_open (legacy default)
+	FolderOpen:     "\uf07c",     //  nf-fa-folder_open
+	FolderClosed:   "\uf07b",     //  nf-fa-folder
 	List:           "\uf03a",     //  nf-fa-list
 	StatusDot:      "\uf111",     //  nf-fa-circle
 	PriorityUrgent: "\uf06a",     //  nf-fa-exclamation_circle
@@ -215,9 +223,10 @@ var nerdFontIcons = Icons{
 	Link:           "\uf0c1",     //  nf-fa-link
 	Assignee:       "\uf007",     //  nf-fa-user
 	Tag:            "\uf02c",     //  nf-fa-tags
-	SubtaskPrefix:  "\uf178",     //  nf-fa-long_arrow_right
-	ParentPrefix:   "\uf062",     //  nf-fa-arrow_up
-	Breadcrumb:     "\ue0b1",     //  powerline right arrow
+	SectionCorner:  "╭─",
+	SubtaskPrefix:  "\uf178", //  nf-fa-long_arrow_right
+	ParentPrefix:   "\uf062", //  nf-fa-arrow_up
+	Breadcrumb:     "\ue0b1", //  powerline right arrow
 }
 
 // icons is the active icon set. All rendering code reads from this variable.
@@ -250,14 +259,18 @@ func prioritySymbol(priority string) string {
 }
 
 // nodeKindSymbol returns a compact symbol for the node kind.
-func nodeKindSymbol(k app.NodeKind) string {
+// For folder nodes, the symbol changes based on the expanded state.
+func nodeKindSymbol(k app.NodeKind, expanded bool) string {
 	switch k {
 	case app.NodeWorkspace:
 		return icons.Workspace
 	case app.NodeSpace:
 		return icons.Space
 	case app.NodeFolder:
-		return icons.Folder
+		if expanded {
+			return icons.FolderOpen
+		}
+		return icons.FolderClosed
 	case app.NodeList:
 		return icons.List
 	default:

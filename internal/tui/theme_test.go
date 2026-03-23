@@ -116,14 +116,24 @@ func TestNodeKindSymbol(t *testing.T) {
 	}
 	seen := make(map[string]bool)
 	for _, k := range kinds {
-		sym := nodeKindSymbol(k)
+		sym := nodeKindSymbol(k, false)
 		if sym == "" {
-			t.Errorf("nodeKindSymbol(%v) returned empty string", k)
+			t.Errorf("nodeKindSymbol(%v, false) returned empty string", k)
 		}
 		if seen[sym] {
-			t.Errorf("nodeKindSymbol(%v) = %q collides with another kind", k, sym)
+			t.Errorf("nodeKindSymbol(%v, false) = %q collides with another kind", k, sym)
 		}
 		seen[sym] = true
+	}
+
+	// Folder expanded vs collapsed should return different symbols.
+	closedSym := nodeKindSymbol(app.NodeFolder, false)
+	openSym := nodeKindSymbol(app.NodeFolder, true)
+	if closedSym == "" || openSym == "" {
+		t.Error("folder symbols must not be empty")
+	}
+	if closedSym == openSym {
+		t.Errorf("folder open (%q) and closed (%q) symbols should differ", openSym, closedSym)
 	}
 }
 

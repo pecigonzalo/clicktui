@@ -102,7 +102,7 @@ func (a *App) buildLayout() {
 	// Each tview widget exposes its embedded *Box via the promoted .Box field.
 	a.paneStylers[paneTree] = newPaneStyler(a.tree.Box, "Hierarchy")
 	a.paneStylers[paneTaskList] = newPaneStyler(a.taskList.Box, "Tasks")
-	a.paneStylers[paneTaskDetail] = newPaneStyler(a.taskDetail.Box, "Detail")
+	a.paneStylers[paneTaskDetail] = newPaneStyler(a.taskDetail.Box, "Details")
 
 	// Give the tree pane access to its own styler so it can update the title
 	// when the selected list changes.

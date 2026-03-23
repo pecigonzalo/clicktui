@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -371,23 +372,27 @@ func (td *TaskDetailPane) applyStatusUpdate(taskID, status string) {
 // ── Rendering helpers ─────────────────────────────────────────────────────────
 
 // detailLabel returns a right-padded, coloured label for a field row.
+// Uses rune count for width calculation so icon-prefixed labels align correctly.
 func detailLabel(s string) string {
-	const width = 10
-	if len(s) < width {
-		s += strings.Repeat(" ", width-len(s))
+	const width = 12
+	n := utf8.RuneCountInString(s)
+	if n < width {
+		s += strings.Repeat(" ", width-n)
 	}
 	return tagColor(ColorDetailLabel) + s + "[-]"
 }
 
 // sectionHeader returns a tview-formatted section divider line.
-// When icon is non-empty the format is:  "icon Title ────────────"
-// When icon is empty:                    "── Title ──────────────"
+// When icon is non-empty the format is:  "╭─ icon Title ────────────"
+// When icon is empty:                    "╭─ Title ──────────────"
+// The leading corner character uses round box-drawing when Nerd Fonts are
+// enabled and a plain dash for the unicode preset.
 func sectionHeader(title, icon string) string {
 	var left string
 	if icon != "" {
-		left = icon + " "
+		left = icons.SectionCorner + " " + icon + " "
 	} else {
-		left = "── "
+		left = icons.SectionCorner + " "
 	}
 	right := " " + strings.Repeat("─", 28)
 	return tagColor(ColorTextMuted) + left + title + right + "[-]"
@@ -561,8 +566,7 @@ func (td *TaskDetailPane) renderBody(d *app.TaskDetail, sel *selectorState) {
 		}
 	}
 	if len(segments) > 0 {
-		fmt.Fprintf(&b, "%s  %s%s[-]\n",
-			detailLabel(""),
+		fmt.Fprintf(&b, "  %s%s[-]\n",
 			tagColor(ColorDetailValue),
 			strings.Join(segments, sep))
 	}
