@@ -120,7 +120,7 @@ func TestStatusTypeLabel(t *testing.T) {
 	}
 }
 
-// ── render: navigation state ─────────────────────────────────────────────────
+// ── render helpers ────────────────────────────────────────────────────────────
 
 // newTestDetailPane creates a TaskDetailPane without a full App for render tests.
 func newTestDetailPane() *TaskDetailPane {
@@ -128,70 +128,7 @@ func newTestDetailPane() *TaskDetailPane {
 	return &TaskDetailPane{TextView: tv}
 }
 
-func TestRender_SetsParentID(t *testing.T) {
-	tdp := newTestDetailPane()
-	tdp.render(&app.TaskDetail{
-		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
-		Space: "S", Folder: "F", List: "L",
-		Parent: "parent123",
-	})
-	if tdp.parentID != "parent123" {
-		t.Errorf("render() parentID = %q, want %q", tdp.parentID, "parent123")
-	}
-}
-
-func TestRender_SetsSubtaskIDs(t *testing.T) {
-	tdp := newTestDetailPane()
-	tdp.render(&app.TaskDetail{
-		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
-		Space: "S", Folder: "F", List: "L",
-		Subtasks: []app.SubtaskSummary{
-			{ID: "sub1", Name: "First", Status: "open"},
-			{ID: "sub2", Name: "Second", Status: "done"},
-		},
-	})
-	if len(tdp.subtaskIDs) != 2 {
-		t.Fatalf("render() subtaskIDs len = %d, want 2", len(tdp.subtaskIDs))
-	}
-	if tdp.subtaskIDs[0] != "sub1" || tdp.subtaskIDs[1] != "sub2" {
-		t.Errorf("render() subtaskIDs = %v, want [sub1 sub2]", tdp.subtaskIDs)
-	}
-}
-
-func TestRender_NoSubtasks_EmptySlice(t *testing.T) {
-	tdp := newTestDetailPane()
-	tdp.render(&app.TaskDetail{
-		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
-		Space: "S", Folder: "F", List: "L",
-	})
-	if len(tdp.subtaskIDs) != 0 {
-		t.Errorf("render() subtaskIDs len = %d, want 0", len(tdp.subtaskIDs))
-	}
-	if tdp.parentID != "" {
-		t.Errorf("render() parentID = %q, want empty", tdp.parentID)
-	}
-}
-
 // ── render: output content ───────────────────────────────────────────────────
-
-func TestRender_ParentShowsNavigationHint(t *testing.T) {
-	tdp := newTestDetailPane()
-	tdp.render(&app.TaskDetail{
-		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
-		Space: "S", Folder: "F", List: "L",
-		Parent: "parent123",
-	})
-	text := tdp.GetText(false)
-	stripped := stripTviewTags(text)
-	if !strings.Contains(stripped, "▸ parent123") {
-		t.Errorf("render() parent line missing '▸ parent123'; stripped = %q", stripped)
-	}
-	// The hint uses tview-escaped brackets [[]p], which stripTviewTags turns
-	// into "p] go to parent".
-	if !strings.Contains(stripped, "p] go to parent") {
-		t.Errorf("render() parent line missing navigation hint; stripped = %q", stripped)
-	}
-}
 
 func TestRender_SubtasksSection(t *testing.T) {
 	tdp := newTestDetailPane()
@@ -246,80 +183,14 @@ func TestRender_ActionHints_StatusOnly(t *testing.T) {
 		t.Errorf("render() missing status hint; stripped = %q", stripped)
 	}
 	if strings.Contains(stripped, "p] go to parent") {
-		t.Errorf("render() should not show parent hint when no parent")
+		t.Errorf("render() should not show parent hint")
 	}
 	if strings.Contains(stripped, "1-N] open subtask") {
-		t.Errorf("render() should not show subtask hint when no subtasks")
+		t.Errorf("render() should not show subtask hint")
 	}
 }
 
-func TestRender_ActionHints_AllPresent(t *testing.T) {
-	tdp := newTestDetailPane()
-	tdp.render(&app.TaskDetail{
-		ID: "task1", Name: "Test", Status: "open", Priority: "normal",
-		Space: "S", Folder: "F", List: "L",
-		Parent: "p1",
-		Subtasks: []app.SubtaskSummary{
-			{ID: "sub1", Name: "S1", Status: "open"},
-		},
-	})
-	stripped := stripTviewTags(tdp.GetText(false))
-	// tview-escaped brackets [[]x] strip to "x] ...".
-	for _, hint := range []string{"s] update status", "p] go to parent", "1-N] open subtask"} {
-		if !strings.Contains(stripped, hint) {
-			t.Errorf("render() missing hint %q; stripped = %q", hint, stripped)
-		}
-	}
-}
-
-// ── inputHandler: navigation ─────────────────────────────────────────────────
-
-func TestInputHandler_PKeyNavigatesToParent(t *testing.T) {
-	tdp := newTestDetailPane()
-	tdp.parentID = "parent1"
-
-	// The 'p' key should consume the event (return nil) when parent is set.
-	// Without a full App, LoadDetail will panic, so we verify the guard by
-	// checking that the no-parent case passes through (tested below) and that
-	// the parentID state is correctly set by render (tested above).
-	if tdp.parentID == "" {
-		t.Fatal("test setup: parentID should be set")
-	}
-}
-
-func TestInputHandler_PKeyNoParent_PassesThrough(t *testing.T) {
-	tdp := newTestDetailPane()
-	tdp.parentID = ""
-
-	event := tcell.NewEventKey(tcell.KeyRune, 'p', tcell.ModNone)
-	result := tdp.inputHandler(event)
-	if result == nil {
-		t.Error("inputHandler('p') with no parent should pass through event, got nil")
-	}
-}
-
-func TestInputHandler_NumberKeyNoSubtasks_PassesThrough(t *testing.T) {
-	tdp := newTestDetailPane()
-	tdp.subtaskIDs = nil
-
-	event := tcell.NewEventKey(tcell.KeyRune, '1', tcell.ModNone)
-	result := tdp.inputHandler(event)
-	if result == nil {
-		t.Error("inputHandler('1') with no subtasks should pass through event, got nil")
-	}
-}
-
-func TestInputHandler_NumberKeyOutOfRange_PassesThrough(t *testing.T) {
-	tdp := newTestDetailPane()
-	tdp.subtaskIDs = []string{"sub1"}
-
-	// '2' is out of range (only 1 subtask)
-	event := tcell.NewEventKey(tcell.KeyRune, '2', tcell.ModNone)
-	result := tdp.inputHandler(event)
-	if result == nil {
-		t.Error("inputHandler('2') with 1 subtask should pass through event, got nil")
-	}
-}
+// ── inputHandler ─────────────────────────────────────────────────────────────
 
 func TestInputHandler_NonRuneKey_PassesThrough(t *testing.T) {
 	tdp := newTestDetailPane()

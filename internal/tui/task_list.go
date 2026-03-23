@@ -64,7 +64,9 @@ func (tlp *TaskListPane) fetchPage() {
 	}
 	tlp.isLoading = true
 	tlp.tuiApp.setStatusLoading("Loading tasks for %s (page %d)…", tlp.listName, tlp.page)
-	tlp.showLoading()
+	if tlp.page == 0 {
+		tlp.showLoading()
+	}
 
 	ctx := context.Background()
 	go func() {
@@ -87,7 +89,17 @@ func (tlp *TaskListPane) fetchPage() {
 				tlp.allTasks = append(tlp.allTasks, tasks...)
 			}
 			tlp.reapplyFilter()
-			if len(tasks) == 0 && tlp.page == 0 {
+
+			// Auto-load next page if this page was full (100 = ClickUp API page size).
+			if len(tasks) == 100 {
+				tlp.page++
+				tlp.isLoading = false // reset so fetchPage() can proceed
+				tlp.fetchPage()
+				return
+			}
+
+			// All pages loaded — show final status.
+			if len(tlp.allTasks) == 0 {
 				tlp.tuiApp.footer.SetStatusReady(fmt.Sprintf("No tasks in %s", tlp.listName))
 			} else {
 				tlp.tuiApp.footer.SetStatusReady(fmt.Sprintf("%d tasks in %s", len(tlp.tasks), tlp.listName))
@@ -169,20 +181,6 @@ func (tlp *TaskListPane) render() {
 			SetMaxWidth(12))
 	}
 
-	// Pagination affordance: show a subtle "load next page" hint row so the
-	// user knows [n] is available.
-	if len(tlp.tasks) > 0 {
-		hintRow := len(tlp.tasks) + 1
-		tlp.SetCell(hintRow, 0, tview.NewTableCell("").
-			SetSelectable(false).SetExpansion(3))
-		tlp.SetCell(hintRow, 1,
-			tview.NewTableCell(tagColor(ColorPaginationHint)+"[n] load next page[-]").
-				SetSelectable(false).
-				SetExpansion(8))
-		tlp.SetCell(hintRow, 2, tview.NewTableCell("").
-			SetSelectable(false).SetExpansion(2))
-	}
-
 	if len(tlp.tasks) > 0 {
 		tlp.Select(1, 0)
 	}
@@ -213,11 +211,6 @@ func (tlp *TaskListPane) onSelected(row, _ int) {
 
 func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 	switch {
-	case event.Key() == tcell.KeyRune && event.Rune() == 'n':
-		// Load next page.
-		tlp.page++
-		tlp.fetchPage()
-		return nil
 	case event.Key() == tcell.KeyRune && event.Rune() == 's':
 		// Trigger status picker for the currently selected task.
 		row, _ := tlp.GetSelection()

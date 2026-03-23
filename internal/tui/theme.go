@@ -59,12 +59,6 @@ var (
 	ColorBadgePriorityLow = tcell.NewHexColor(0x888888)
 )
 
-// Selection / affordances
-var (
-	// ColorPaginationHint is the foreground for the "load more" row.
-	ColorPaginationHint = tcell.NewHexColor(0x666666)
-)
-
 // Hierarchy tree node colours
 var (
 	ColorNodeWorkspace = tcell.ColorGold
