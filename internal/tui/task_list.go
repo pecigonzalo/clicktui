@@ -152,7 +152,7 @@ func (tlp *TaskListPane) render() {
 		row := i + 1
 
 		// Status: dot prefix adds visual weight without requiring colour columns.
-		statusText := "● " + t.Status
+		statusText := icons.StatusDot + " " + t.Status
 		tlp.SetCell(row, 0, tview.NewTableCell(statusText).
 			SetTextColor(ColorBadgeStatus).
 			SetExpansion(3).
@@ -162,7 +162,7 @@ func (tlp *TaskListPane) render() {
 		nameText := tview.Escape(t.Name)
 		nameColor := ColorText
 		if t.Parent != "" {
-			nameText = "  ↳ " + nameText
+			nameText = "  " + icons.SubtaskPrefix + " " + nameText
 			nameColor = ColorTextMuted
 		}
 		tlp.SetCell(row, 1, tview.NewTableCell(nameText).
@@ -249,7 +249,7 @@ func (tlp *TaskListPane) refreshCurrentTask(taskID, newStatus string) {
 		if t.ID == taskID {
 			tlp.tasks[i].Status = newStatus
 			row := i + 1 // header occupies row 0
-			statusText := "● " + newStatus
+			statusText := icons.StatusDot + " " + newStatus
 			tlp.SetCell(row, 0, tview.NewTableCell(statusText).
 				SetTextColor(ColorBadgeStatus).
 				SetExpansion(3).

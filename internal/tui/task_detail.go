@@ -116,7 +116,7 @@ func (td *TaskDetailPane) openStatusPicker() {
 func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOption) {
 	list := tview.NewList()
 	list.SetBorder(true).
-		SetTitle(" ● Update Status ").
+		SetTitle(" " + icons.StatusDot + " Update Status ").
 		SetBorderColor(ColorBorderFocused).
 		SetTitleColor(ColorTitleFocused)
 	list.ShowSecondaryText(true)
@@ -146,7 +146,7 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 		// Build a coloured dot prefix using any color hint from the API.
 		// Fall back to the generic badge colour when the API color is absent.
 		dotColor := statusDotColor(s.Color, s.Type)
-		dot := tagColor(dotColor) + "●[-]"
+		dot := tagColor(dotColor) + icons.StatusDot + "[-]"
 		typeLabel := statusTypeLabel(s.Type)
 		main := dot + " " + tview.Escape(s.Name)
 
@@ -246,7 +246,7 @@ func sectionHeader(title string) string {
 
 // statusBadge returns a styled inline badge for a status string.
 func statusBadge(status string) string {
-	return tagColor(ColorBadgeStatus) + "● " + tview.Escape(status) + "[-]"
+	return tagColor(ColorBadgeStatus) + icons.StatusDot + " " + tview.Escape(status) + "[-]"
 }
 
 // priorityBadge returns a styled inline badge for a priority string.
@@ -349,9 +349,10 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Folder"), tagColor(ColorDetailValue), tview.Escape(d.Folder))
 	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("List"), tagColor(ColorDetailValue), tview.Escape(d.List))
 	if d.Parent != "" {
-		fmt.Fprintf(&b, "%s  %s▸ %s[-]\n",
+		fmt.Fprintf(&b, "%s  %s%s %s[-]\n",
 			detailLabel("Parent"),
 			tagColor(ColorDetailValue),
+			icons.ParentPrefix,
 			tview.Escape(d.Parent))
 	}
 
@@ -359,8 +360,9 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 	if len(d.Subtasks) > 0 {
 		b.WriteString("\n" + sectionHeader(fmt.Sprintf("Subtasks (%d)", len(d.Subtasks))) + "\n")
 		for _, st := range d.Subtasks {
-			fmt.Fprintf(&b, "%s▸[-] %s%s[-]  %s  %s%s[-]\n",
+			fmt.Fprintf(&b, "%s%s[-] %s%s[-]  %s  %s%s[-]\n",
 				tagColor(ColorDetailValue),
+				icons.SubtaskPrefix,
 				tagColor(ColorTextSubtle),
 				tview.Escape(st.ID),
 				statusBadge(st.Status),

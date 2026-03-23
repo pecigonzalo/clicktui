@@ -43,6 +43,11 @@
         "list_id": {
           "type": "string",
           "description": "ClickUp list ID for direct navigation. Requires workspace_id and space_id to also be set."
+        },
+        "nerd_font": {
+          "type": "boolean",
+          "description": "Enable Nerd Font icons for enhanced terminal rendering",
+          "default": false
         }
       },
       "required": ["name", "auth_method"],

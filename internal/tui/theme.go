@@ -6,6 +6,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/pecigonzalo/clicktui/internal/app"
@@ -135,35 +137,123 @@ func priorityColor(priority string) tcell.Color {
 	}
 }
 
+// ── Icon registry ─────────────────────────────────────────────────────────────
+
+// Icons holds all symbolic glyphs used across the TUI.
+type Icons struct {
+	// Tree node kinds
+	Workspace string
+	Space     string
+	Folder    string
+	List      string
+
+	// Status & priority
+	StatusDot      string
+	PriorityUrgent string
+	PriorityHigh   string
+	PriorityNormal string
+	PriorityLow    string
+
+	// Detail pane sections
+	Calendar    string
+	Location    string
+	Description string
+	Subtask     string
+	Link        string
+	Assignee    string
+	Tag         string
+
+	// Misc
+	SubtaskPrefix string // ↳ or arrow
+	ParentPrefix  string // ▸ or arrow
+	Breadcrumb    string // › separator
+}
+
+var unicodeIcons = Icons{
+	Workspace:      "◉",
+	Space:          "◈",
+	Folder:         "▸",
+	List:           "≡",
+	StatusDot:      "●",
+	PriorityUrgent: "!!",
+	PriorityHigh:   " !",
+	PriorityNormal: " -",
+	PriorityLow:    " ·",
+	Calendar:       "",
+	Location:       "",
+	Description:    "",
+	Subtask:        "",
+	Link:           "",
+	Assignee:       "",
+	Tag:            "",
+	SubtaskPrefix:  "↳",
+	ParentPrefix:   "▸",
+	Breadcrumb:     "›",
+}
+
+var nerdFontIcons = Icons{
+	Workspace:      "\U000f0c21", // 󰰡
+	Space:          "\uf0ac",     //  nf-fa-globe
+	Folder:         "\uf07c",     //  nf-fa-folder_open
+	List:           "\uf03a",     //  nf-fa-list
+	StatusDot:      "\uf111",     //  nf-fa-circle
+	PriorityUrgent: "\uf06a",     //  nf-fa-exclamation_circle
+	PriorityHigh:   "\uf062",     //  nf-fa-arrow_up
+	PriorityNormal: "\uf068",     //  nf-fa-minus
+	PriorityLow:    "\uf063",     //  nf-fa-arrow_down
+	Calendar:       "\uf073",     //  nf-fa-calendar
+	Location:       "\uf041",     //  nf-fa-map_marker
+	Description:    "\uf15c",     //  nf-fa-file_text
+	Subtask:        "\uf0ae",     //  nf-fa-tasks
+	Link:           "\uf0c1",     //  nf-fa-link
+	Assignee:       "\uf007",     //  nf-fa-user
+	Tag:            "\uf02c",     //  nf-fa-tags
+	SubtaskPrefix:  "\uf178",     //  nf-fa-long_arrow_right
+	ParentPrefix:   "\uf062",     //  nf-fa-arrow_up
+	Breadcrumb:     "\ue0b1",     //  powerline right arrow
+}
+
+// icons is the active icon set. All rendering code reads from this variable.
+var icons = unicodeIcons
+
+// InitIcons selects the icon preset. Call once at startup before any rendering.
+func InitIcons(nerdFont bool) {
+	if nerdFont {
+		icons = nerdFontIcons
+	} else {
+		icons = unicodeIcons
+	}
+}
+
 // prioritySymbol returns a compact single-character indicator for a priority.
 // This is used alongside the full name to give a quick visual scan affordance.
 func prioritySymbol(priority string) string {
-	switch priority {
+	switch strings.ToLower(priority) {
 	case "urgent":
-		return "!!"
+		return icons.PriorityUrgent
 	case "high":
-		return " !"
+		return icons.PriorityHigh
 	case "normal":
-		return " -"
+		return icons.PriorityNormal
 	case "low":
-		return " ·"
+		return icons.PriorityLow
 	default:
 		return "  "
 	}
 }
 
-// nodeKindSymbol returns a compact unicode symbol for the node kind.
+// nodeKindSymbol returns a compact symbol for the node kind.
 func nodeKindSymbol(k app.NodeKind) string {
 	switch k {
 	case app.NodeWorkspace:
-		return "◉"
+		return icons.Workspace
 	case app.NodeSpace:
-		return "◈"
+		return icons.Space
 	case app.NodeFolder:
-		return "▸"
+		return icons.Folder
 	case app.NodeList:
-		return "≡"
+		return icons.List
 	default:
-		return "·"
+		return "?"
 	}
 }

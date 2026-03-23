@@ -318,3 +318,84 @@ func TestConfigDir_And_ConfigFilePath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, "config.yaml"), path)
 }
+
+func TestNerdFont_YAMLRoundTrip(t *testing.T) {
+	cases := []struct {
+		name     string
+		nerdFont bool
+	}{
+		{"nerd_font_true", true},
+		{"nerd_font_false", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.New()
+			cfg.SetProfile(&config.Profile{
+				Name:       "default",
+				AuthMethod: config.AuthMethodPersonalToken,
+				NerdFont:   tc.nerdFont,
+			})
+
+			data, err := yaml.Marshal(cfg)
+			require.NoError(t, err)
+
+			var loaded config.Config
+			require.NoError(t, yaml.Unmarshal(data, &loaded))
+
+			p, err := loaded.Profile("default")
+			require.NoError(t, err)
+			assert.Equal(t, tc.nerdFont, p.NerdFont, "NerdFont(%v) yaml round-trip mismatch", tc.nerdFont)
+		})
+	}
+}
+
+func TestNerdFontEnabled_EnvOverride(t *testing.T) {
+	cases := []struct {
+		name       string
+		envValue   string
+		profileVal bool
+		want       bool
+	}{
+		{"env_1_overrides_false", "1", false, true},
+		{"env_true_overrides_false", "true", false, true},
+		{"env_yes_overrides_false", "yes", false, true},
+		{"env_TRUE_case_insensitive", "TRUE", false, true},
+		{"env_YES_case_insensitive", "YES", false, true},
+		{"env_0_overrides_true", "0", true, false},
+		{"env_false_overrides_true", "false", true, false},
+		{"env_no_overrides_true", "no", true, false},
+		{"env_FALSE_case_insensitive", "FALSE", true, false},
+		{"env_NO_case_insensitive", "NO", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLICKTUI_NERD_FONTS", tc.envValue)
+			p := &config.Profile{NerdFont: tc.profileVal}
+			got := p.NerdFontEnabled()
+			if got != tc.want {
+				t.Errorf("NerdFontEnabled() = %v, want %v (env=%q, profile=%v)", got, tc.want, tc.envValue, tc.profileVal)
+			}
+		})
+	}
+}
+
+func TestNerdFontEnabled_FallsBackToProfile(t *testing.T) {
+	cases := []struct {
+		name       string
+		profileVal bool
+	}{
+		{"profile_true_no_env", true},
+		{"profile_false_no_env", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Ensure env var is unset for this test.
+			t.Setenv("CLICKTUI_NERD_FONTS", "")
+			p := &config.Profile{NerdFont: tc.profileVal}
+			got := p.NerdFontEnabled()
+			if got != tc.profileVal {
+				t.Errorf("NerdFontEnabled() = %v, want %v (no env set, profile=%v)", got, tc.profileVal, tc.profileVal)
+			}
+		})
+	}
+}

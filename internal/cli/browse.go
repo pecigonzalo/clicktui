@@ -34,6 +34,13 @@ func newBrowseCmd() *cobra.Command {
 
 			opts := resolveLaunchOptions(workspaceFlag, spaceFlag, listFlag)
 
+			// Initialise icon preset before building any TUI components.
+			if cfg, err := config.Load(); err == nil {
+				if p, err := cfg.Active(); err == nil {
+					tui.InitIcons(p.NerdFontEnabled())
+				}
+			}
+
 			tuiApp := tui.New(hierarchySvc, taskSvc, logger, opts)
 			return tuiApp.Run(cmd.Context())
 		},
