@@ -154,6 +154,12 @@ func (tp *TreePane) onSelected(node *tview.TreeNode) {
 	case app.NodeFolder:
 		node.SetExpanded(!node.IsExpanded())
 	case app.NodeList:
+		// Collapse all sibling branches so only the path to the selected
+		// list remains expanded. Skip when a filter is active — the filter
+		// already expands everything for visibility.
+		if tp.app.treeFilter == nil || !tp.app.treeFilter.IsActive() {
+			tp.collapseExcept(node)
+		}
 		tp.selectList(ref)
 	}
 }
@@ -336,6 +342,50 @@ func (tp *TreePane) makeTreeNode(n *app.HierarchyNode) *tview.TreeNode {
 		SetColor(nodeColor(n.Kind)).
 		SetSelectedTextStyle(selStyle).
 		SetSelectable(true)
+}
+
+// collapseExcept collapses all non-leaf nodes that are not ancestors of the
+// selected node. The root and the direct path from root to selected stay
+// expanded; everything else is collapsed. This is a no-op if the selected
+// node cannot be found in the tree.
+func (tp *TreePane) collapseExcept(selected *tview.TreeNode) {
+	ancestors := make(map[*tview.TreeNode]bool)
+	if !tp.findAncestors(tp.root, selected, ancestors) {
+		return
+	}
+	tp.collapseNonAncestors(tp.root, ancestors)
+}
+
+// findAncestors walks the subtree rooted at node, looking for target. When
+// target is found, every node on the path from node to target is added to
+// ancestors and true is returned.
+func (tp *TreePane) findAncestors(node, target *tview.TreeNode, ancestors map[*tview.TreeNode]bool) bool {
+	if node == target {
+		ancestors[node] = true
+		return true
+	}
+	for _, child := range node.GetChildren() {
+		if tp.findAncestors(child, target, ancestors) {
+			ancestors[node] = true
+			return true
+		}
+	}
+	return false
+}
+
+// collapseNonAncestors collapses every non-leaf node that is not in the
+// ancestors set. Ancestor nodes stay expanded so the selected node remains
+// visible.
+func (tp *TreePane) collapseNonAncestors(node *tview.TreeNode, ancestors map[*tview.TreeNode]bool) {
+	if !ancestors[node] {
+		node.SetExpanded(false)
+		return
+	}
+	// This node is on the path to the selection — keep it expanded and
+	// recurse so sibling subtrees below it are collapsed.
+	for _, child := range node.GetChildren() {
+		tp.collapseNonAncestors(child, ancestors)
+	}
 }
 
 func nodeColor(k app.NodeKind) tcell.Color {
