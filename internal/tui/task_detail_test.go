@@ -345,6 +345,116 @@ func TestInputHandler_NonRuneKey_PassesThrough(t *testing.T) {
 	}
 }
 
+// ── buildFields ──────────────────────────────────────────────────────────────
+
+func TestBuildFields_AllPopulated(t *testing.T) {
+	tdp := newTestDetailPane()
+	d := &app.TaskDetail{
+		ID:          "task1",
+		CustomID:    "PROJ-42",
+		URL:         "https://app.clickup.com/t/task1",
+		DueDate:     "2024-06-01",
+		StartDate:   "2024-05-15",
+		Parent:      "parent1",
+		Description: "A task description.",
+		Subtasks: []app.SubtaskSummary{
+			{ID: "sub1", Name: "Subtask A", Status: "open"},
+			{ID: "sub2", Name: "Subtask B", Status: "done"},
+		},
+	}
+	tdp.buildFields(d)
+
+	// Expected fields: Task ID, Custom ID, URL, Due Date, Start Date, Parent,
+	// Description, + 2 subtasks = 9.
+	if got := len(tdp.fields); got != 9 {
+		t.Fatalf("buildFields() produced %d fields, want 9", got)
+	}
+
+	// Verify first field is always Task ID.
+	if f := tdp.fields[0]; f.label != "Task ID" || f.value != "task1" || f.kind != fieldCopy {
+		t.Errorf("fields[0] = %+v, want Task ID / task1 / fieldCopy", f)
+	}
+	// Verify URL field has fieldOpen kind.
+	if f := tdp.fields[2]; f.label != "URL" || f.kind != fieldOpen {
+		t.Errorf("fields[2] = %+v, want URL / fieldOpen", f)
+	}
+	// Verify Parent field has fieldNavigate kind.
+	if f := tdp.fields[5]; f.label != "Parent" || f.kind != fieldNavigate {
+		t.Errorf("fields[5] = %+v, want Parent / fieldNavigate", f)
+	}
+	// Verify subtask fields have fieldNavigate kind and use subtask ID as value.
+	if f := tdp.fields[7]; f.kind != fieldNavigate || f.value != "sub1" {
+		t.Errorf("fields[7] = %+v, want fieldNavigate with value sub1", f)
+	}
+	if f := tdp.fields[8]; f.kind != fieldNavigate || f.value != "sub2" {
+		t.Errorf("fields[8] = %+v, want fieldNavigate with value sub2", f)
+	}
+}
+
+func TestBuildFields_EmptyValuesExcluded(t *testing.T) {
+	tdp := newTestDetailPane()
+	d := &app.TaskDetail{
+		ID:     "task1",
+		Name:   "Minimal Task",
+		Status: "open",
+	}
+	tdp.buildFields(d)
+
+	// Only Task ID should be present — all optional fields are empty.
+	if got := len(tdp.fields); got != 1 {
+		t.Fatalf("buildFields() with minimal detail produced %d fields, want 1", got)
+	}
+	if f := tdp.fields[0]; f.label != "Task ID" {
+		t.Errorf("fields[0].label = %q, want 'Task ID'", f.label)
+	}
+}
+
+func TestBuildFields_SubtasksIncluded(t *testing.T) {
+	tdp := newTestDetailPane()
+	d := &app.TaskDetail{
+		ID: "task1",
+		Subtasks: []app.SubtaskSummary{
+			{ID: "s1", Name: "Sub One", Status: "open"},
+			{ID: "s2", Name: "Sub Two", Status: "done"},
+			{ID: "s3", Name: "Sub Three", Status: "open"},
+		},
+	}
+	tdp.buildFields(d)
+
+	// 1 (Task ID) + 3 subtasks = 4.
+	if got := len(tdp.fields); got != 4 {
+		t.Fatalf("buildFields() with 3 subtasks produced %d fields, want 4", got)
+	}
+	// All subtask fields should be navigate kind.
+	for i := 1; i < 4; i++ {
+		if tdp.fields[i].kind != fieldNavigate {
+			t.Errorf("fields[%d].kind = %d, want fieldNavigate", i, tdp.fields[i].kind)
+		}
+	}
+}
+
+func TestBuildFields_ResetsBetweenCalls(t *testing.T) {
+	tdp := newTestDetailPane()
+	d1 := &app.TaskDetail{
+		ID:      "task1",
+		DueDate: "2024-06-01",
+		URL:     "https://example.com",
+	}
+	tdp.buildFields(d1)
+	first := len(tdp.fields)
+
+	d2 := &app.TaskDetail{ID: "task2"}
+	tdp.buildFields(d2)
+	second := len(tdp.fields)
+
+	if first == second {
+		t.Errorf("buildFields should reset: first call had %d fields, second had %d (same)", first, second)
+	}
+	if second != 1 {
+		t.Errorf("buildFields after minimal detail: got %d fields, want 1", second)
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // stripTviewTags removes tview colour/style tags (e.g. "[red]", "[#rrggbb]", "[-]")

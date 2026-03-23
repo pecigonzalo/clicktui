@@ -1,4 +1,4 @@
-// Package tui — task detail pane and status picker.
+// Package tui — task detail pane, status picker, and field selector.
 package tui
 
 import (
@@ -15,6 +15,24 @@ import (
 
 const pageStatusPicker = "status_picker"
 
+// ── Field selector types ─────────────────────────────────────────────────────
+
+// fieldKind describes the action available on a selectable field.
+type fieldKind int
+
+const (
+	fieldCopy     fieldKind = iota // y copies the value
+	fieldOpen                      // y copies, o opens URL
+	fieldNavigate                  // Enter navigates to task, y copies ID
+)
+
+// selectableField represents a single field in the selector overlay.
+type selectableField struct {
+	label string    // Display name (e.g., "Task ID", "URL", "Due Date")
+	value string    // Raw copyable value
+	kind  fieldKind // What kind of action is available
+}
+
 // TaskDetailPane shows detailed information about a selected task.
 type TaskDetailPane struct {
 	*tview.TextView
@@ -22,6 +40,12 @@ type TaskDetailPane struct {
 	taskID   string
 	listID   string
 	taskName string
+
+	// Field selector state.
+	detail       *app.TaskDetail   // last rendered detail for field access
+	fields       []selectableField // current selectable fields
+	selectedIdx  int               // currently selected field index
+	selectorMode bool              // whether selector mode is active
 }
 
 // NewTaskDetailPane creates an empty task detail pane.
@@ -33,7 +57,11 @@ func NewTaskDetailPane(a *App) *TaskDetailPane {
 	tv.SetBorder(true)
 	tv.SetText(emptyText("Select a task to view details"))
 
-	tdp := &TaskDetailPane{TextView: tv, tuiApp: a}
+	tdp := &TaskDetailPane{
+		TextView:    tv,
+		tuiApp:      a,
+		selectedIdx: -1,
+	}
 	tv.SetInputCapture(tdp.inputHandler)
 	return tdp
 }
@@ -45,27 +73,137 @@ func (td *TaskDetailPane) CurrentTaskID() string {
 }
 
 func (td *TaskDetailPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
-	if event.Key() != tcell.KeyRune {
-		return event
+	if td.selectorMode {
+		return td.selectorInputHandler(event)
 	}
-	switch event.Rune() {
-	case 's':
-		if td.taskID != "" {
-			td.openStatusPicker()
+	switch event.Key() {
+	case tcell.KeyEnter:
+		if td.taskID != "" && len(td.fields) > 0 {
+			td.enterSelectorMode()
 			return nil
 		}
-	case 'r':
-		if td.taskID != "" {
-			td.tuiApp.tasks.InvalidateTaskDetail(td.taskID)
-			td.LoadDetail(td.taskID)
+	case tcell.KeyRune:
+		switch event.Rune() {
+		case 's':
+			if td.taskID != "" {
+				td.openStatusPicker()
+				return nil
+			}
+		case 'r':
+			if td.taskID != "" {
+				td.tuiApp.tasks.InvalidateTaskDetail(td.taskID)
+				td.LoadDetail(td.taskID)
+				return nil
+			}
+		}
+	}
+	return event
+}
+
+// selectorInputHandler handles keys while the field selector is active.
+func (td *TaskDetailPane) selectorInputHandler(event *tcell.EventKey) *tcell.EventKey {
+	n := len(td.fields)
+	if n == 0 {
+		td.exitSelectorMode()
+		return nil
+	}
+
+	switch event.Key() {
+	case tcell.KeyEscape:
+		td.exitSelectorMode()
+		return nil
+	case tcell.KeyUp:
+		td.selectedIdx = (td.selectedIdx - 1 + n) % n
+		td.renderWithSelector()
+		return nil
+	case tcell.KeyDown:
+		td.selectedIdx = (td.selectedIdx + 1) % n
+		td.renderWithSelector()
+		return nil
+	case tcell.KeyEnter:
+		f := td.fields[td.selectedIdx]
+		if f.kind == fieldNavigate {
+			td.exitSelectorMode()
+			td.LoadDetail(f.value)
+			return nil
+		}
+		// For non-navigate fields, Enter copies the value (same as y).
+		td.copyFieldAndExit(f)
+		return nil
+	case tcell.KeyRune:
+		switch event.Rune() {
+		case 'k':
+			td.selectedIdx = (td.selectedIdx - 1 + n) % n
+			td.renderWithSelector()
+			return nil
+		case 'j':
+			td.selectedIdx = (td.selectedIdx + 1) % n
+			td.renderWithSelector()
+			return nil
+		case 'y':
+			td.copyFieldAndExit(td.fields[td.selectedIdx])
+			return nil
+		case 'o':
+			f := td.fields[td.selectedIdx]
+			if f.kind == fieldOpen {
+				td.exitSelectorMode()
+				if err := openURL(f.value); err != nil {
+					td.tuiApp.footer.SetStatusError("open url: %v", err)
+				} else {
+					td.tuiApp.footer.SetStatusReady("Opened: " + f.value)
+				}
+				return nil
+			}
+			// Ignore 'o' on non-openable fields.
 			return nil
 		}
 	}
 	return event
 }
 
+// enterSelectorMode activates the field selector overlay.
+func (td *TaskDetailPane) enterSelectorMode() {
+	td.selectorMode = true
+	td.selectedIdx = 0
+	td.renderWithSelector()
+	td.tuiApp.footer.SetHelp("↑↓:field", "y:copy", "o:open", "Enter:go", "Esc:back")
+}
+
+// exitSelectorMode deactivates the field selector and re-renders clean.
+func (td *TaskDetailPane) exitSelectorMode() {
+	td.selectorMode = false
+	td.selectedIdx = -1
+	if td.detail != nil {
+		td.render(td.detail)
+	}
+	td.tuiApp.restoreDefaultHelp()
+}
+
+// copyFieldAndExit copies the selected field value to the clipboard and exits
+// selector mode.
+func (td *TaskDetailPane) copyFieldAndExit(f selectableField) {
+	td.exitSelectorMode()
+	if err := writeClipboard(f.value); err != nil {
+		td.tuiApp.footer.SetStatusError("copy failed: %v", err)
+		return
+	}
+	td.tuiApp.footer.SetStatusReady(fmt.Sprintf("Copied %s: %s", f.label, truncateDisplay(f.value, 40)))
+}
+
+// truncateDisplay shortens s for display if longer than max runes.
+func truncateDisplay(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}
+
 // LoadDetail fetches and renders a task's full details.
 func (td *TaskDetailPane) LoadDetail(taskID string) {
+	// Exit selector mode when loading a new task.
+	td.selectorMode = false
+	td.selectedIdx = -1
+
 	td.tuiApp.setStatusLoading("Loading task %s…", taskID)
 
 	ctx := context.Background()
@@ -81,6 +219,8 @@ func (td *TaskDetailPane) LoadDetail(taskID string) {
 			td.taskID = detail.ID
 			td.listID = detail.ListID
 			td.taskName = detail.Name
+			td.detail = detail
+			td.buildFields(detail)
 			td.render(detail)
 			td.tuiApp.footer.SetStatusReady(fmt.Sprintf("Viewing: %s", detail.Name))
 		})
@@ -217,6 +357,8 @@ func (td *TaskDetailPane) applyStatusUpdate(taskID, status string) {
 			td.taskID = detail.ID
 			td.listID = detail.ListID
 			td.taskName = detail.Name
+			td.detail = detail
+			td.buildFields(detail)
 			td.render(detail)
 			td.tuiApp.footer.SetStatusReady(fmt.Sprintf("Status → %q", status))
 
@@ -305,6 +447,29 @@ func statusTypeLabel(t string) string {
 }
 
 func (td *TaskDetailPane) render(d *app.TaskDetail) {
+	td.renderBody(d, nil)
+}
+
+// renderWithSelector re-renders the detail body with the selector overlay
+// appended at the bottom.
+func (td *TaskDetailPane) renderWithSelector() {
+	if td.detail == nil {
+		return
+	}
+	sel := &selectorState{fields: td.fields, idx: td.selectedIdx}
+	td.renderBody(td.detail, sel)
+	td.ScrollToEnd()
+}
+
+// selectorState holds rendering parameters for the field selector overlay.
+type selectorState struct {
+	fields []selectableField
+	idx    int
+}
+
+// renderBody renders the full detail pane text. When sel is non-nil, the
+// field selector overlay is appended at the bottom.
+func (td *TaskDetailPane) renderBody(d *app.TaskDetail, sel *selectorState) {
 	var b strings.Builder
 
 	// ── Title block ──────────────────────────────────────────────────────────
@@ -443,6 +608,90 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 		}
 	}
 
+	// ── Field selector overlay ──────────────────────────────────────────────
+	if sel != nil && len(sel.fields) > 0 {
+		b.WriteString("\n" + tagColor(ColorTextMuted) + "─── Select Field " + strings.Repeat("─", 24) + "[-]\n")
+		for i, f := range sel.fields {
+			td.renderSelectorRow(&b, f, i == sel.idx)
+		}
+	}
+
 	td.SetText(b.String())
 	td.ScrollToBeginning()
+}
+
+// renderSelectorRow writes a single field row into b.
+// When selected is true, the row is rendered with a highlight and cursor.
+func (td *TaskDetailPane) renderSelectorRow(b *strings.Builder, f selectableField, selected bool) {
+	const labelWidth = 14 // Pad labels for alignment.
+
+	// Cursor indicator.
+	cursor := "  "
+	if selected {
+		cursor = tagColor(ColorSelectorHighlight) + "> " + "[-]"
+	}
+
+	// Padded label.
+	label := tview.Escape(f.label)
+	if len(f.label) < labelWidth {
+		label += strings.Repeat(" ", labelWidth-len(f.label))
+	}
+
+	// Value display — truncate long values for readability.
+	val := truncateDisplay(f.value, 48)
+
+	// Kind hint suffix.
+	var hint string
+	switch f.kind {
+	case fieldOpen:
+		hint = tagColor(ColorTextMuted) + "  [o:open]" + "[-]"
+	case fieldNavigate:
+		hint = tagColor(ColorTextMuted) + "  [↵:go]" + "[-]"
+	default:
+		hint = ""
+	}
+
+	if selected {
+		fmt.Fprintf(b, "%s[::r]%s  %s[::- ]%s\n", cursor, label, tview.Escape(val), hint)
+	} else {
+		fmt.Fprintf(b, "%s%s%s[-]  %s%s[-]%s\n",
+			cursor,
+			tagColor(ColorDetailLabel), label,
+			tagColor(ColorDetailValue), tview.Escape(val),
+			hint)
+	}
+}
+
+// ── Field registry ───────────────────────────────────────────────────────────
+
+// buildFields populates the selectable field list from a TaskDetail.
+// Fields with empty values are excluded.
+func (td *TaskDetailPane) buildFields(d *app.TaskDetail) {
+	if td.fields != nil {
+		td.fields = td.fields[:0]
+	}
+
+	// Always include the task ID.
+	td.fields = append(td.fields, selectableField{"Task ID", d.ID, fieldCopy})
+	if d.CustomID != "" {
+		td.fields = append(td.fields, selectableField{"Custom ID", d.CustomID, fieldCopy})
+	}
+	if d.URL != "" {
+		td.fields = append(td.fields, selectableField{"URL", d.URL, fieldOpen})
+	}
+	if d.DueDate != "" {
+		td.fields = append(td.fields, selectableField{"Due Date", d.DueDate, fieldCopy})
+	}
+	if d.StartDate != "" {
+		td.fields = append(td.fields, selectableField{"Start Date", d.StartDate, fieldCopy})
+	}
+	if d.Parent != "" {
+		td.fields = append(td.fields, selectableField{"Parent", d.Parent, fieldNavigate})
+	}
+	if d.Description != "" {
+		td.fields = append(td.fields, selectableField{"Description", d.Description, fieldCopy})
+	}
+	for _, st := range d.Subtasks {
+		td.fields = append(td.fields, selectableField{icons.SubtaskPrefix + " " + st.Name, st.ID, fieldNavigate})
+	}
 }

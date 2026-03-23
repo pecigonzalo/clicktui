@@ -87,6 +87,13 @@ var (
 	ColorFilterPrompt = tcell.ColorMediumOrchid
 )
 
+// Selector
+var (
+	// ColorSelectorHighlight is the background colour for the selected row in
+	// the field selector overlay.
+	ColorSelectorHighlight = tcell.ColorDodgerBlue
+)
+
 // Footer
 var (
 	// ColorFooterStatus is the foreground for the left status segment.
