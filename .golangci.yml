@@ -1,0 +1,48 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/pecigonzalo/clicktui
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - errorlint
+    - nilnil
+    - containedctx
+    - unused
+    - unparam
+    - modernize
+    - unconvert
+    - depguard
+    - forbidigo
+    - sloglint
+    - usetesting
+  settings:
+    depguard:
+      rules:
+        no-stdlib-log:
+          deny:
+            - pkg: "log$"
+              desc: "Use *slog.Logger; stdlib log package is banned"
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: "^slog\\.(Info|Warn|Error|Debug|Log)$"
+          pkg: "^log/slog$"
+          msg: "Use injected *slog.Logger instead of package-level slog calls"
+  exclusions:
+    rules:
+      - linters:
+          - depguard
+        path: _test\.go
+        text: "stdlib log package is banned"

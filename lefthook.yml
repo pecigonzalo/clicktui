@@ -1,0 +1,66 @@
+# Lefthook configuration for clicktui
+# https://github.com/evilmartians/lefthook
+
+min_version: 1.0.0
+
+output:
+  - summary
+  - execution
+  - failure
+
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      glob: "*.go"
+      run: task lint
+
+    unit-tests:
+      glob: "*.go"
+      run: go test -short -race -timeout 60s ./...
+
+    format-check:
+      glob: "*.go"
+      run: |
+        unformatted=$(gofmt -l {staged_files})
+        if [ -n "$unformatted" ]; then
+          echo "The following files are not properly formatted:"
+          echo "$unformatted"
+          echo ""
+          echo "Run 'task format:fix' to fix formatting"
+          exit 1
+        fi
+
+    go-mod-tidy:
+      glob: "{go.mod,go.sum,*.go}"
+      run: |
+        go mod tidy
+        if ! git diff --quiet go.mod go.sum; then
+          echo "go.mod or go.sum is not tidy"
+          echo "Run 'go mod tidy' and commit the changes"
+          exit 1
+        fi
+
+commit-msg:
+  commands:
+    commit-message-format:
+      run: |
+        commit_msg=$(cat {1})
+
+        if ! echo "$commit_msg" | grep -qE '^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?: .+'; then
+          echo "Commit message does not follow conventional commits format"
+          echo ""
+          echo "Expected format: <type>(<scope>): <subject>"
+          echo "Types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert"
+          echo ""
+          echo "Examples:"
+          echo "  feat(auth): add personal token login command"
+          echo "  fix(client): handle 429 rate limit responses"
+          echo ""
+          exit 1
+        fi
+
+        first_line=$(echo "$commit_msg" | head -n1)
+        if [ ${#first_line} -gt 72 ]; then
+          echo "Warning: commit subject line is too long (${#first_line} > 72 characters)"
+        fi

@@ -1,0 +1,74 @@
+version: "3"
+
+vars:
+  BINARY_NAME: clicktui
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build the clicktui binary
+    sources:
+      - cmd/**/*.go
+      - internal/**/*.go
+    generates:
+      - bin/{{.BINARY_NAME}}
+    cmds:
+      - go build -o bin/{{.BINARY_NAME}} ./cmd/clicktui
+
+  test:
+    desc: Run unit tests (skips integration tests via -short)
+    cmds:
+      - go test -short -timeout=60s ./...
+
+  test:race:
+    desc: Run unit tests with race detection
+    cmds:
+      - go test -short -race -timeout=60s ./...
+
+  test:coverage:
+    desc: Run tests and print coverage summary
+    cmds:
+      - go test -short -timeout=60s -cover ./...
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf bin/
+      - find . -name "*.out" -delete
+
+  lint:
+    desc: Run golangci-lint (review mode, no auto-fix)
+    cmds:
+      - golangci-lint run ./...
+
+  lint:fix:
+    desc: Run golangci-lint with --fix to auto-apply safe fixes
+    cmds:
+      - golangci-lint run --fix ./...
+
+  format:
+    desc: Check formatting (diff only, no writes)
+    cmds:
+      - golangci-lint fmt --diff ./...
+
+  format:fix:
+    desc: Apply formatting in place
+    cmds:
+      - golangci-lint fmt ./...
+
+  hooks:install:
+    desc: Install git hooks via lefthook
+    cmds:
+      - lefthook install
+    status:
+      - test -f .git/hooks/pre-commit
+
+  hooks:run:
+    desc: Run pre-commit hooks manually
+    cmds:
+      - lefthook run pre-commit

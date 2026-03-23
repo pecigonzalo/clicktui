@@ -1,0 +1,32 @@
+# Binaries
+bin/
+dist/
+*.exe
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build and test artifacts
+*.out
+*.test
+*.prof
+coverage.out
+
+# OS files
+.DS_Store
+
+# Go modules
+vendor/
+
+# Direnv
+.direnv/
+.envrc.cache
+
+# Task build cache
+.task/
+
+# OpenCode session data
+.opencode/sessions/
