@@ -1,0 +1,8 @@
+task: [test] go test -short -timeout=60s ./...
+?   	github.com/pecigonzalo/clicktui/cmd/clicktui	[no test files]
+ok  	github.com/pecigonzalo/clicktui/internal/app	(cached)
+ok  	github.com/pecigonzalo/clicktui/internal/auth	(cached)
+?   	github.com/pecigonzalo/clicktui/internal/cli	[no test files]
+ok  	github.com/pecigonzalo/clicktui/internal/clickup	(cached)
+ok  	github.com/pecigonzalo/clicktui/internal/config	(cached)
+ok  	github.com/pecigonzalo/clicktui/internal/tui	(cached)

@@ -75,6 +75,10 @@ type App struct {
 	launch       LaunchOptions
 	treeVisible  bool
 	treeMinWidth int // proportion when tree is visible
+
+	// ctx is the application-level context, set during Run and propagated to
+	// all background goroutines so they can be cancelled on shutdown.
+	ctx context.Context //nolint:containedctx // App-level ctx propagated to async UI handlers.
 }
 
 // New creates a TUI application wired to the given services.
@@ -391,6 +395,8 @@ func (a *App) restoreDefaultHelp() {
 // QueueUpdateDraw which blocks until the event loop is running, so the
 // goroutine must be started before Run() takes over the main goroutine.
 func (a *App) Run(ctx context.Context) error {
+	a.ctx = ctx
+
 	// Set the loading status directly (no event loop needed for this).
 	switch {
 	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "" && a.launch.ListID != "":
@@ -446,7 +452,7 @@ func (a *App) doLoadWorkspaces(ctx context.Context) {
 			a.setError("failed to load workspaces: %v", err)
 			return
 		}
-		a.tree.SetWorkspaces(ctx, nodes)
+		a.tree.SetWorkspaces(nodes)
 		a.footer.SetStatusReady("Ready")
 	})
 }
@@ -461,7 +467,7 @@ func (a *App) doAutoNavToWorkspace(ctx context.Context, workspaceID string) {
 			a.setError("load spaces: %v", err)
 			return
 		}
-		a.tree.SetSpaces(ctx, workspaceID, spaces)
+		a.tree.SetSpaces(workspaceID, spaces)
 		a.footer.SetStatusReady("Ready")
 	})
 }
@@ -491,7 +497,7 @@ func (a *App) doAutoNavToSpace(ctx context.Context, workspaceID, spaceID string)
 	}
 
 	a.tviewApp.QueueUpdateDraw(func() {
-		a.tree.SetSpacesAndExpand(ctx, workspaceID, spaces, spaceID, contents)
+		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents)
 		a.setFocusPane(paneTree)
 		a.footer.SetStatusReady("Ready")
 	})
@@ -529,7 +535,7 @@ func (a *App) doAutoNavToList(ctx context.Context, workspaceID, spaceID, listID 
 	}
 
 	a.tviewApp.QueueUpdateDraw(func() {
-		a.tree.SetSpacesAndExpand(ctx, workspaceID, spaces, spaceID, contents)
+		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents)
 		a.taskList.LoadTasks(listID, listName)
 		a.setFocusPane(paneTaskList)
 		a.footer.SetStatusReady("Ready")

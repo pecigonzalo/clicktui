@@ -2,7 +2,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -207,9 +206,8 @@ func (td *TaskDetailPane) LoadDetail(taskID string) {
 
 	td.tuiApp.setStatusLoading("Loading task %s…", taskID)
 
-	ctx := context.Background()
 	go func() {
-		detail, err := td.tuiApp.tasks.LoadTaskDetail(ctx, taskID)
+		detail, err := td.tuiApp.tasks.LoadTaskDetail(td.tuiApp.ctx, taskID)
 		td.tuiApp.tviewApp.QueueUpdateDraw(func() {
 			if err != nil {
 				td.tuiApp.logger.Error("load task detail", "task", taskID, "error", err)
@@ -235,9 +233,8 @@ func (td *TaskDetailPane) openStatusPicker() {
 	taskID := td.taskID
 	listID := td.listID
 
-	ctx := context.Background()
 	go func() {
-		statuses, err := td.tuiApp.tasks.LoadListStatuses(ctx, listID)
+		statuses, err := td.tuiApp.tasks.LoadListStatuses(td.tuiApp.ctx, listID)
 		td.tuiApp.tviewApp.QueueUpdateDraw(func() {
 			if err != nil {
 				td.tuiApp.logger.Error("load list statuses", "list", listID, "error", err)
@@ -345,9 +342,8 @@ func centreModal(p tview.Primitive, width, height int) tview.Primitive {
 func (td *TaskDetailPane) applyStatusUpdate(taskID, status string) {
 	td.tuiApp.setStatusLoading("Updating status to %q…", status)
 
-	ctx := context.Background()
 	go func() {
-		detail, err := td.tuiApp.tasks.UpdateTaskStatus(ctx, taskID, status)
+		detail, err := td.tuiApp.tasks.UpdateTaskStatus(td.tuiApp.ctx, taskID, status)
 		td.tuiApp.tviewApp.QueueUpdateDraw(func() {
 			if err != nil {
 				td.tuiApp.logger.Error("update task status", "task", taskID, "status", status, "error", err)

@@ -2,7 +2,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gdamore/tcell/v2"
@@ -65,9 +64,8 @@ func (tlp *TaskListPane) fetchPage() {
 	tlp.isLoading = true
 	tlp.tuiApp.setStatusLoading("Loading tasks for %s (page %d)…", tlp.listName, tlp.page)
 
-	ctx := context.Background()
 	go func() {
-		tasks, err := tlp.tuiApp.tasks.LoadTasks(ctx, tlp.currentID, tlp.page)
+		tasks, err := tlp.tuiApp.tasks.LoadTasks(tlp.tuiApp.ctx, tlp.currentID, tlp.page)
 		tlp.tuiApp.tviewApp.QueueUpdateDraw(func() {
 			tlp.isLoading = false
 			if err != nil {

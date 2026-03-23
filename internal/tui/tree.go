@@ -2,7 +2,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gdamore/tcell/v2"
@@ -41,7 +40,7 @@ func NewTreePane(a *App) *TreePane {
 }
 
 // SetWorkspaces populates the tree root with workspace nodes.
-func (tp *TreePane) SetWorkspaces(ctx context.Context, nodes []*app.HierarchyNode) {
+func (tp *TreePane) SetWorkspaces(nodes []*app.HierarchyNode) {
 	tp.root.ClearChildren()
 	for _, n := range nodes {
 		child := tp.makeTreeNode(n)
@@ -53,7 +52,7 @@ func (tp *TreePane) SetWorkspaces(ctx context.Context, nodes []*app.HierarchyNod
 // SetSpaces populates the tree with space nodes for a single workspace,
 // skipping the workspace-level listing. Used when only a workspace ID is
 // configured.
-func (tp *TreePane) SetSpaces(_ context.Context, workspaceID string, nodes []*app.HierarchyNode) {
+func (tp *TreePane) SetSpaces(workspaceID string, nodes []*app.HierarchyNode) {
 	tp.root.ClearChildren()
 	wsNode := &app.HierarchyNode{
 		ID:       workspaceID,
@@ -77,7 +76,6 @@ func (tp *TreePane) SetSpaces(_ context.Context, workspaceID string, nodes []*ap
 // target space with its pre-loaded contents. Used when both workspace and
 // space IDs are configured for auto-navigation.
 func (tp *TreePane) SetSpacesAndExpand(
-	_ context.Context,
 	workspaceID string,
 	spaces []*app.HierarchyNode,
 	targetSpaceID string,
@@ -189,9 +187,8 @@ func (tp *TreePane) expandWorkspace(node *tview.TreeNode, ref *app.HierarchyNode
 	node.ClearChildren()
 	tp.app.setStatusLoading("Loading spaces…")
 
-	ctx := context.Background()
 	go func() {
-		children, err := tp.app.hierarchy.LoadSpaces(ctx, ref.ID)
+		children, err := tp.app.hierarchy.LoadSpaces(tp.app.ctx, ref.ID)
 		tp.app.tviewApp.QueueUpdateDraw(func() {
 			node.ClearChildren()
 			if err != nil {
@@ -224,9 +221,8 @@ func (tp *TreePane) expandSpace(node *tview.TreeNode, ref *app.HierarchyNode) {
 	node.ClearChildren()
 	tp.app.setStatusLoading("Loading folders and lists…")
 
-	ctx := context.Background()
 	go func() {
-		children, err := tp.app.hierarchy.LoadSpaceContents(ctx, ref.ID)
+		children, err := tp.app.hierarchy.LoadSpaceContents(tp.app.ctx, ref.ID)
 		tp.app.tviewApp.QueueUpdateDraw(func() {
 			node.ClearChildren()
 			if err != nil {
