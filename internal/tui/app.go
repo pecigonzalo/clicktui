@@ -132,6 +132,7 @@ func (a *App) buildLayout() {
 		"Enter:select",
 		"[:toggle tree",
 		"s:update status",
+		"y:copy id",
 		"q:quit",
 	)
 
@@ -154,6 +155,9 @@ func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case '[':
 			a.toggleTree()
+			return nil
+		case 'y':
+			a.yankID()
 			return nil
 		}
 	}
@@ -186,6 +190,32 @@ func (a *App) setFocusPane(id paneID) {
 // toggleTree shows or hides the tree pane.
 func (a *App) toggleTree() {
 	a.setTreeVisible(!a.treeVisible)
+}
+
+// yankID copies the ID of the currently focused entity to the system clipboard.
+// The entity is determined by which pane currently holds focus:
+//   - Tree pane: the selected hierarchy node's ID
+//   - Task list pane: the selected task's ID
+//   - Task detail pane: the currently displayed task's ID
+func (a *App) yankID() {
+	var id string
+	switch paneID(a.focusIdx) {
+	case paneTree:
+		id = a.tree.SelectedNodeID()
+	case paneTaskList:
+		id = a.taskList.SelectedTaskID()
+	case paneTaskDetail:
+		id = a.taskDetail.CurrentTaskID()
+	}
+	if id == "" {
+		a.footer.SetStatusReady("Nothing to copy")
+		return
+	}
+	if err := writeClipboard(id); err != nil {
+		a.footer.SetStatusError("copy failed: %v", err)
+		return
+	}
+	a.footer.SetStatusReady("Copied: #" + id)
 }
 
 // setTreeVisible controls tree pane visibility. When hiding, focus moves to

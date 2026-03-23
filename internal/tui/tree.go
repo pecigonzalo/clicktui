@@ -239,12 +239,31 @@ func (tp *TreePane) selectList(ref *app.HierarchyNode) {
 	tp.app.taskList.LoadTasks(ref.ID, ref.Name)
 }
 
+// SelectedNodeID returns the ID of the currently selected tree node, or ""
+// when no node with a HierarchyNode reference is selected.
+func (tp *TreePane) SelectedNodeID() string {
+	node := tp.GetCurrentNode()
+	if node == nil {
+		return ""
+	}
+	ref, ok := node.GetReference().(*app.HierarchyNode)
+	if !ok {
+		return ""
+	}
+	return ref.ID
+}
+
 // makeTreeNode creates a styled tree node for a hierarchy entry.
 // Format: "Symbol Name" — the symbol conveys type, spacing conveys depth via
 // tview's own indentation on child nodes.
+// For list nodes an additional muted "#ID" suffix is appended so users can
+// identify the correct ID to pass to the --list flag.
 func (tp *TreePane) makeTreeNode(n *app.HierarchyNode) *tview.TreeNode {
 	sym := nodeKindSymbol(n.Kind)
 	text := sym + " " + n.Name
+	if n.Kind == app.NodeList {
+		text += " " + tagColor(ColorTextMuted) + "#" + n.ID + "[-]"
+	}
 	// Selection style: black on blue so the current node is unmistakably visible.
 	selStyle := tcell.StyleDefault.
 		Foreground(tcell.ColorBlack).

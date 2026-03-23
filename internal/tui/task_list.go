@@ -90,14 +90,27 @@ func (tlp *TaskListPane) fetchPage() {
 	}()
 }
 
+// SelectedTaskID returns the ID of the currently selected task, or "" when no
+// task row is selected.
+func (tlp *TaskListPane) SelectedTaskID() string {
+	row, _ := tlp.GetSelection()
+	idx := row - 1 // row 0 is the header
+	if idx < 0 || idx >= len(tlp.tasks) {
+		return ""
+	}
+	return tlp.tasks[idx].ID
+}
+
 func (tlp *TaskListPane) render() {
 	tlp.Clear()
 
 	// Update the pane title via styler so focus state is preserved.
+	// Format: "ListName  #ListID  N tasks"
 	if tlp.styler != nil {
-		tlp.styler.title = fmt.Sprintf("%s  %s%d tasks[-]",
+		tlp.styler.title = fmt.Sprintf("%s  %s#%s  %d tasks[-]",
 			tview.Escape(tlp.listName),
 			tagColor(ColorTextMuted),
+			tlp.currentID,
 			len(tlp.tasks),
 		)
 		tlp.styler.reapply()

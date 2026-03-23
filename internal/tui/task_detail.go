@@ -37,6 +37,12 @@ func NewTaskDetailPane(a *App) *TaskDetailPane {
 	return tdp
 }
 
+// CurrentTaskID returns the ID of the task currently displayed in the detail
+// pane, or "" when no task has been loaded.
+func (td *TaskDetailPane) CurrentTaskID() string {
+	return td.taskID
+}
+
 func (td *TaskDetailPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 	if event.Key() == tcell.KeyRune && event.Rune() == 's' {
 		if td.taskID != "" {
