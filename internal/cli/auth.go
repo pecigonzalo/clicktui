@@ -47,10 +47,27 @@ to store your ClickUp personal API token in the OS keyring.`,
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-			cfg.SetProfile(&config.Profile{
+
+			profile := &config.Profile{
 				Name:       profileFlag,
 				AuthMethod: config.AuthMethodPersonalToken,
-			})
+			}
+
+			// Preserve existing workspace/space IDs if the profile already exists.
+			if existing, err := cfg.Profile(profileFlag); err == nil {
+				profile.WorkspaceID = existing.WorkspaceID
+				profile.SpaceID = existing.SpaceID
+			}
+
+			// Auto-detect workspace when none is configured and exactly one exists.
+			if profile.WorkspaceID == "" {
+				if wsID, err := detectSingleWorkspace(cmd.Context(), token); err == nil && wsID != "" {
+					profile.WorkspaceID = wsID
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Auto-detected workspace %s.\n", wsID)
+				}
+			}
+
+			cfg.SetProfile(profile)
 			cfg.ActiveProfile = profileFlag
 			if err := config.Save(cfg); err != nil {
 				return fmt.Errorf("save config: %w", err)
@@ -63,6 +80,22 @@ to store your ClickUp personal API token in the OS keyring.`,
 
 	cmd.Flags().StringVarP(&token, "token", "t", "", "ClickUp personal API token")
 	return cmd
+}
+
+// detectSingleWorkspace fetches workspaces for the given token and returns the
+// workspace ID if exactly one exists. Returns ("", nil) when detection is not
+// possible or multiple workspaces exist.
+func detectSingleWorkspace(ctx context.Context, token string) (string, error) {
+	provider := auth.NewStaticTokenProvider(token)
+	client := clickup.New(provider)
+	teams, err := client.Teams(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(teams) == 1 {
+		return teams[0].ID, nil
+	}
+	return "", nil
 }
 
 // newAuthLogoutCmd removes credentials for the active profile.

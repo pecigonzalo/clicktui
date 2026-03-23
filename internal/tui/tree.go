@@ -50,6 +50,80 @@ func (tp *TreePane) SetWorkspaces(ctx context.Context, nodes []*app.HierarchyNod
 	}
 }
 
+// SetSpaces populates the tree with space nodes for a single workspace,
+// skipping the workspace-level listing. Used when only a workspace ID is
+// configured.
+func (tp *TreePane) SetSpaces(_ context.Context, workspaceID string, nodes []*app.HierarchyNode) {
+	tp.root.ClearChildren()
+	wsNode := &app.HierarchyNode{
+		ID:       workspaceID,
+		Name:     "Workspace",
+		Kind:     app.NodeWorkspace,
+		Loaded:   true,
+		Children: nodes,
+	}
+	wsTreeNode := tp.makeTreeNode(wsNode)
+	for _, n := range nodes {
+		child := tp.makeTreeNode(n)
+		child.AddChild(tview.NewTreeNode("  loading…").SetColor(ColorTextSubtle).SetSelectable(false))
+		wsTreeNode.AddChild(child)
+	}
+	wsTreeNode.SetExpanded(true)
+	tp.root.AddChild(wsTreeNode)
+}
+
+// SetSpacesAndExpand populates the tree for a workspace, then expands the
+// target space with its pre-loaded contents. Used when both workspace and
+// space IDs are configured for auto-navigation.
+func (tp *TreePane) SetSpacesAndExpand(
+	_ context.Context,
+	workspaceID string,
+	spaces []*app.HierarchyNode,
+	targetSpaceID string,
+	contents []*app.HierarchyNode,
+) {
+	tp.root.ClearChildren()
+	wsNode := &app.HierarchyNode{
+		ID:       workspaceID,
+		Name:     "Workspace",
+		Kind:     app.NodeWorkspace,
+		Loaded:   true,
+		Children: spaces,
+	}
+	wsTreeNode := tp.makeTreeNode(wsNode)
+
+	for _, s := range spaces {
+		spaceTreeNode := tp.makeTreeNode(s)
+		if s.ID == targetSpaceID {
+			// Mark as loaded and populate with fetched contents.
+			s.Loaded = true
+			s.Children = contents
+			for _, c := range contents {
+				child := tp.makeTreeNode(c)
+				if c.Kind == app.NodeFolder {
+					for _, listNode := range c.Children {
+						child.AddChild(tp.makeTreeNode(listNode))
+					}
+				}
+				spaceTreeNode.AddChild(child)
+			}
+			spaceTreeNode.SetExpanded(true)
+			tp.SetCurrentNode(spaceTreeNode)
+
+			// Update the tree title to show the space name.
+			tp.selected = s.Name
+			tp.refreshTitle()
+		} else {
+			spaceTreeNode.AddChild(
+				tview.NewTreeNode("  loading…").SetColor(ColorTextSubtle).SetSelectable(false),
+			)
+		}
+		wsTreeNode.AddChild(spaceTreeNode)
+	}
+	wsTreeNode.SetExpanded(true)
+	tp.root.AddChild(wsTreeNode)
+}
+
 // refreshTitle updates the pane title to show the selected list context.
 // Call after styler is assigned and after selection changes.
 func (tp *TreePane) refreshTitle() {

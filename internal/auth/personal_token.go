@@ -41,3 +41,26 @@ func (p *PersonalTokenProvider) Authorize(_ context.Context, r *http.Request) er
 	r.Header.Set("Authorization", token)
 	return nil
 }
+
+// StaticTokenProvider is a Provider that uses a fixed token value, useful for
+// one-shot API calls where the token is already known (e.g. during login).
+type StaticTokenProvider struct {
+	token string
+}
+
+// Compile-time assertion that *StaticTokenProvider satisfies Provider.
+var _ Provider = (*StaticTokenProvider)(nil)
+
+// NewStaticTokenProvider returns a Provider that injects a fixed token.
+func NewStaticTokenProvider(token string) *StaticTokenProvider {
+	return &StaticTokenProvider{token: token}
+}
+
+// Method returns MethodPersonalToken.
+func (p *StaticTokenProvider) Method() Method { return MethodPersonalToken }
+
+// Authorize injects the Authorization header with the static token.
+func (p *StaticTokenProvider) Authorize(_ context.Context, r *http.Request) error {
+	r.Header.Set("Authorization", p.token)
+	return nil
+}

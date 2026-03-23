@@ -27,6 +27,8 @@ type Profile struct {
 	AuthMethod AuthMethod `json:"auth_method"`
 	// WorkspaceID is an optional ClickUp workspace (team) ID to use by default.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	// SpaceID is an optional ClickUp space ID to navigate to on launch.
+	SpaceID string `json:"space_id,omitempty"`
 }
 
 // Config is the top-level application configuration.

@@ -117,6 +117,7 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 			"Tab:next pane",
 			"Shift+Tab:prev pane",
 			"Enter:select",
+			"[:toggle tree",
 			"s:update status",
 			"q:quit",
 		)

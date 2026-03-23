@@ -10,11 +10,14 @@ import (
 	"github.com/pecigonzalo/clicktui/internal/app"
 	"github.com/pecigonzalo/clicktui/internal/auth"
 	"github.com/pecigonzalo/clicktui/internal/clickup"
+	"github.com/pecigonzalo/clicktui/internal/config"
 	"github.com/pecigonzalo/clicktui/internal/tui"
 )
 
 func newBrowseCmd() *cobra.Command {
-	return &cobra.Command{
+	var workspaceFlag, spaceFlag string
+
+	cmd := &cobra.Command{
 		Use:   "browse",
 		Short: "Launch the TUI to browse your ClickUp workspace",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -29,8 +32,44 @@ func newBrowseCmd() *cobra.Command {
 			hierarchySvc := app.NewHierarchyService(client)
 			taskSvc := app.NewTaskService(client)
 
-			tuiApp := tui.New(hierarchySvc, taskSvc, logger)
+			opts := resolveLaunchOptions(workspaceFlag, spaceFlag)
+
+			tuiApp := tui.New(hierarchySvc, taskSvc, logger, opts)
 			return tuiApp.Run(cmd.Context())
 		},
 	}
+
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace (team) ID to navigate to on launch")
+	cmd.Flags().StringVar(&spaceFlag, "space", "", "space ID to navigate to on launch (requires --workspace)")
+
+	return cmd
+}
+
+// resolveLaunchOptions merges CLI flags over profile config values. Flags take
+// precedence; when absent, values from the active profile are used.
+func resolveLaunchOptions(workspaceFlag, spaceFlag string) tui.LaunchOptions {
+	var opts tui.LaunchOptions
+
+	// Load profile defaults — errors are non-fatal; the TUI works without them.
+	if cfg, err := config.Load(); err == nil {
+		if p, err := cfg.Active(); err == nil {
+			opts.WorkspaceID = p.WorkspaceID
+			opts.SpaceID = p.SpaceID
+		}
+	}
+
+	// CLI flags override profile values.
+	if workspaceFlag != "" {
+		opts.WorkspaceID = workspaceFlag
+	}
+	if spaceFlag != "" {
+		opts.SpaceID = spaceFlag
+	}
+
+	// SpaceID without WorkspaceID is meaningless — clear it.
+	if opts.WorkspaceID == "" {
+		opts.SpaceID = ""
+	}
+
+	return opts
 }

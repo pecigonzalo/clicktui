@@ -29,6 +29,16 @@ const (
 	paneTaskDetail
 )
 
+// LaunchOptions configures the initial navigation state of the TUI.
+// When both WorkspaceID and SpaceID are set, the TUI auto-navigates to the
+// space, expands its contents, and collapses the tree pane. When only
+// WorkspaceID is set, the TUI loads spaces for that workspace. When neither is
+// set, the TUI loads all workspaces (default behaviour).
+type LaunchOptions struct {
+	WorkspaceID string
+	SpaceID     string
+}
+
 // App is the main TUI application.
 type App struct {
 	tviewApp   *tview.Application
@@ -36,6 +46,7 @@ type App struct {
 	tasks      *app.TaskService
 	logger     *slog.Logger
 	pages      *tview.Pages
+	panes      *tview.Flex // column flex holding tree, taskList, taskDetail
 	tree       *TreePane
 	taskList   *TaskListPane
 	taskDetail *TaskDetailPane
@@ -45,15 +56,22 @@ type App struct {
 	// focusOrder tracks the panes for Tab cycling.
 	focusOrder []tview.Primitive
 	focusIdx   int
+
+	launch       LaunchOptions
+	treeVisible  bool
+	treeMinWidth int // proportion when tree is visible
 }
 
 // New creates a TUI application wired to the given services.
-func New(hierarchy *app.HierarchyService, tasks *app.TaskService, logger *slog.Logger) *App {
+func New(hierarchy *app.HierarchyService, tasks *app.TaskService, logger *slog.Logger, opts LaunchOptions) *App {
 	a := &App{
-		tviewApp:  tview.NewApplication(),
-		hierarchy: hierarchy,
-		tasks:     tasks,
-		logger:    logger,
+		tviewApp:     tview.NewApplication(),
+		hierarchy:    hierarchy,
+		tasks:        tasks,
+		logger:       logger,
+		launch:       opts,
+		treeVisible:  true,
+		treeMinWidth: 3,
 	}
 	a.buildLayout()
 	return a
@@ -85,13 +103,13 @@ func (a *App) buildLayout() {
 	// Layout: hierarchy is narrower than task list; detail gets a good share.
 	// Proportions 3:5:4 give the hierarchy enough room for deep names while the
 	// task list has the most space for scanning rows.
-	panes := tview.NewFlex().SetDirection(tview.FlexColumn).
+	a.panes = tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(a.tree, 0, 3, true).
 		AddItem(a.taskList, 0, 5, false).
 		AddItem(a.taskDetail, 0, 4, false)
 
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(panes, 0, 1, true).
+		AddItem(a.panes, 0, 1, true).
 		AddItem(a.footer, 1, 0, false)
 
 	a.pages = tview.NewPages().AddPage(pageMain, mainLayout, true, true)
@@ -107,6 +125,7 @@ func (a *App) buildLayout() {
 		"Tab:next pane",
 		"Shift+Tab:prev pane",
 		"Enter:select",
+		"[:toggle tree",
 		"s:update status",
 		"q:quit",
 	)
@@ -124,8 +143,12 @@ func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		a.cycleFocus(-1)
 		return nil
 	case tcell.KeyRune:
-		if event.Rune() == 'q' {
+		switch event.Rune() {
+		case 'q':
 			a.tviewApp.Stop()
+			return nil
+		case '[':
+			a.toggleTree()
 			return nil
 		}
 	}
@@ -133,7 +156,12 @@ func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (a *App) cycleFocus(delta int) {
-	a.setFocusPane(paneID((a.focusIdx + delta + len(a.focusOrder)) % len(a.focusOrder)))
+	next := paneID((a.focusIdx + delta + len(a.focusOrder)) % len(a.focusOrder))
+	// Skip the tree pane when it is collapsed.
+	if !a.treeVisible && next == paneTree {
+		next = paneID((int(next) + delta + len(a.focusOrder)) % len(a.focusOrder))
+	}
+	a.setFocusPane(next)
 }
 
 // setFocusPane moves focus to the given pane, updates chrome on both the
@@ -150,10 +178,46 @@ func (a *App) setFocusPane(id paneID) {
 	a.tviewApp.SetFocus(a.focusOrder[id])
 }
 
+// toggleTree shows or hides the tree pane.
+func (a *App) toggleTree() {
+	a.setTreeVisible(!a.treeVisible)
+}
+
+// setTreeVisible controls tree pane visibility. When hiding, focus moves to
+// the task list pane. When showing, the tree regains its original proportional
+// width.
+func (a *App) setTreeVisible(visible bool) {
+	if a.treeVisible == visible {
+		return
+	}
+	a.treeVisible = visible
+
+	// Rebuild the panes flex — tview does not support hiding individual items.
+	a.panes.Clear()
+	if visible {
+		a.panes.AddItem(a.tree, 0, a.treeMinWidth, false)
+	}
+	a.panes.AddItem(a.taskList, 0, 5, !visible)
+	a.panes.AddItem(a.taskDetail, 0, 4, false)
+
+	if !visible && paneID(a.focusIdx) == paneTree {
+		a.setFocusPane(paneTaskList)
+	}
+}
+
 // Run starts the TUI event loop. It blocks until the application exits.
 func (a *App) Run(ctx context.Context) error {
-	a.footer.SetStatusLoading("Loading workspaces…")
-	a.loadWorkspaces(ctx)
+	switch {
+	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "":
+		a.footer.SetStatusLoading("Navigating to space…")
+		a.autoNavToSpace(ctx, a.launch.WorkspaceID, a.launch.SpaceID)
+	case a.launch.WorkspaceID != "":
+		a.footer.SetStatusLoading("Loading spaces…")
+		a.autoNavToWorkspace(ctx, a.launch.WorkspaceID)
+	default:
+		a.footer.SetStatusLoading("Loading workspaces…")
+		a.loadWorkspaces(ctx)
+	}
 	return a.tviewApp.Run()
 }
 
@@ -177,6 +241,55 @@ func (a *App) loadWorkspaces(ctx context.Context) {
 				return
 			}
 			a.tree.SetWorkspaces(ctx, nodes)
+			a.footer.SetStatusReady("Ready")
+		})
+	}()
+}
+
+// autoNavToWorkspace loads spaces for a single workspace and shows them in the
+// tree. The user still picks a space manually.
+func (a *App) autoNavToWorkspace(ctx context.Context, workspaceID string) {
+	go func() {
+		spaces, err := a.hierarchy.LoadSpaces(ctx, workspaceID)
+		a.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				a.logger.Error("auto-nav: load spaces", "workspace", workspaceID, "error", err)
+				a.setError("load spaces: %v", err)
+				return
+			}
+			a.tree.SetSpaces(ctx, workspaceID, spaces)
+			a.footer.SetStatusReady("Ready")
+		})
+	}()
+}
+
+// autoNavToSpace loads a specific space's contents (folders/lists), expands it
+// in the tree, and collapses the tree pane so the task list is prominent.
+func (a *App) autoNavToSpace(ctx context.Context, workspaceID, spaceID string) {
+	go func() {
+		// Load spaces to find the target space name, then load its contents.
+		spaces, err := a.hierarchy.LoadSpaces(ctx, workspaceID)
+		if err != nil {
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.logger.Error("auto-nav: load spaces", "workspace", workspaceID, "error", err)
+				a.setError("load spaces: %v", err)
+			})
+			return
+		}
+
+		contents, err := a.hierarchy.LoadSpaceContents(ctx, spaceID)
+		if err != nil {
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.logger.Error("auto-nav: load space contents", "space", spaceID, "error", err)
+				a.setError("load space contents: %v", err)
+			})
+			return
+		}
+
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.tree.SetSpacesAndExpand(ctx, workspaceID, spaces, spaceID, contents)
+			a.setTreeVisible(false)
+			a.setFocusPane(paneTaskList)
 			a.footer.SetStatusReady("Ready")
 		})
 	}()
