@@ -30,14 +30,18 @@ const (
 )
 
 // LaunchOptions configures the initial navigation state of the TUI.
-// When both WorkspaceID and SpaceID are set, the TUI auto-navigates to the
-// space, expands its contents in the tree, and focuses the tree so the user
-// can immediately select a folder or list. When only WorkspaceID is set, the
-// TUI loads spaces for that workspace. When neither is set, the TUI loads all
-// workspaces (default behaviour).
+// When all three IDs are set (WorkspaceID, SpaceID, ListID), the TUI
+// auto-navigates directly to that list, loading tasks immediately and
+// focusing the task list pane. When only WorkspaceID and SpaceID are set,
+// the TUI expands the space in the tree and focuses the tree pane. When
+// only WorkspaceID is set, the TUI loads spaces for that workspace. When
+// neither is set, the TUI loads all workspaces (default behaviour).
 type LaunchOptions struct {
 	WorkspaceID string
 	SpaceID     string
+	// ListID is an optional ClickUp list ID to navigate to on launch.
+	// Requires WorkspaceID and SpaceID to also be set.
+	ListID string
 }
 
 // App is the main TUI application.
@@ -215,6 +219,8 @@ func (a *App) setTreeVisible(visible bool) {
 func (a *App) Run(ctx context.Context) error {
 	// Set the loading status directly (no event loop needed for this).
 	switch {
+	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "" && a.launch.ListID != "":
+		a.footer.SetStatusLoading("Navigating to list…")
 	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "":
 		a.footer.SetStatusLoading("Navigating to space…")
 	case a.launch.WorkspaceID != "":
@@ -245,6 +251,8 @@ func (a *App) setError(format string, args ...any) {
 // called from a goroutine — never from the main goroutine before tviewApp.Run().
 func (a *App) initialLoad(ctx context.Context) {
 	switch {
+	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "" && a.launch.ListID != "":
+		a.doAutoNavToList(ctx, a.launch.WorkspaceID, a.launch.SpaceID, a.launch.ListID)
 	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "":
 		a.doAutoNavToSpace(ctx, a.launch.WorkspaceID, a.launch.SpaceID)
 	case a.launch.WorkspaceID != "":
@@ -313,4 +321,57 @@ func (a *App) doAutoNavToSpace(ctx context.Context, workspaceID, spaceID string)
 		a.setFocusPane(paneTree)
 		a.footer.SetStatusReady("Ready")
 	})
+}
+
+// doAutoNavToList loads spaces and the target space's contents, populates the
+// tree, and immediately loads the task list for the given list ID. Focus is set
+// to the task list pane since the user already knows which list they want.
+// The tree remains visible for context. It blocks until all API calls and UI
+// updates are complete.
+func (a *App) doAutoNavToList(ctx context.Context, workspaceID, spaceID, listID string) {
+	spaces, err := a.hierarchy.LoadSpaces(ctx, workspaceID)
+	if err != nil {
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.logger.Error("auto-nav: load spaces", "workspace", workspaceID, "error", err)
+			a.setError("load spaces: %v", err)
+		})
+		return
+	}
+
+	contents, err := a.hierarchy.LoadSpaceContents(ctx, spaceID)
+	if err != nil {
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.logger.Error("auto-nav: load space contents", "space", spaceID, "error", err)
+			a.setError("load space contents: %v", err)
+		})
+		return
+	}
+
+	// Find the list name from the loaded hierarchy so the task list title is
+	// meaningful. Fall back to the raw ID when the list is not found.
+	listName := findListName(contents, listID)
+	if listName == "" {
+		listName = listID
+	}
+
+	a.tviewApp.QueueUpdateDraw(func() {
+		a.tree.SetSpacesAndExpand(ctx, workspaceID, spaces, spaceID, contents)
+		a.taskList.LoadTasks(listID, listName)
+		a.setFocusPane(paneTaskList)
+		a.footer.SetStatusReady("Ready")
+	})
+}
+
+// findListName searches the hierarchy nodes (and their children) for a list
+// node matching listID and returns its name. Returns "" when not found.
+func findListName(nodes []*app.HierarchyNode, listID string) string {
+	for _, n := range nodes {
+		if n.ID == listID && n.Kind == app.NodeList {
+			return n.Name
+		}
+		if name := findListName(n.Children, listID); name != "" {
+			return name
+		}
+	}
+	return ""
 }

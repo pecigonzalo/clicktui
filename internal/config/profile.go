@@ -29,6 +29,9 @@ type Profile struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	// SpaceID is an optional ClickUp space ID to navigate to on launch.
 	SpaceID string `json:"space_id,omitempty"`
+	// ListID is an optional ClickUp list ID to navigate to on launch.
+	// Requires WorkspaceID and SpaceID to also be set.
+	ListID string `json:"list_id,omitempty"`
 }
 
 // Config is the top-level application configuration.

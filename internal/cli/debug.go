@@ -14,7 +14,7 @@ import (
 )
 
 func newDebugCmd() *cobra.Command {
-	var workspaceFlag, spaceFlag string
+	var workspaceFlag, spaceFlag, listFlag string
 
 	cmd := &cobra.Command{
 		Use:   "debug",
@@ -25,14 +25,16 @@ Use this command to verify that authentication and API calls work without
 launching the terminal UI.
 
 Examples:
-  clicktui debug                                     # list workspaces
-  clicktui debug --workspace 2566449                 # list spaces in workspace
-  clicktui debug --workspace 2566449 --space 901234  # list space contents`,
+  clicktui debug                                                    # list workspaces
+  clicktui debug --workspace 2566449                                # list spaces in workspace
+  clicktui debug --workspace 2566449 --space 901234                 # list space contents
+  clicktui debug --workspace 2566449 --space 901234 --list 9012345  # list tasks in list`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			store := auth.NewKeyringStore()
 			provider := auth.NewPersonalTokenProvider(profileFlag, store)
 			client := clickup.New(provider)
 			hierarchySvc := app.NewHierarchyService(client)
+			taskSvc := app.NewTaskService(client)
 			ctx := cmd.Context()
 			w := cmd.OutOrStdout()
 
@@ -72,12 +74,27 @@ Examples:
 			}
 			printNodes(w, contents, 0)
 
+			if listFlag == "" {
+				return nil
+			}
+
+			// Load and print tasks for the given list.
+			_, _ = fmt.Fprintf(w, "\n=== Tasks (list %s, page 0) ===\n", listFlag)
+			tasks, err := taskSvc.LoadTasks(ctx, listFlag, 0)
+			if err != nil {
+				return fmt.Errorf("load tasks: %w", err)
+			}
+			for _, t := range tasks {
+				_, _ = fmt.Fprintf(w, "  [%s] %s  (%s)  pri:%s\n", t.Status, t.Name, t.ID, t.Priority)
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace (team) ID")
 	cmd.Flags().StringVar(&spaceFlag, "space", "", "space ID (requires --workspace)")
+	cmd.Flags().StringVar(&listFlag, "list", "", "list ID to print tasks for (requires --workspace and --space)")
 
 	return cmd
 }

@@ -15,7 +15,7 @@ import (
 )
 
 func newBrowseCmd() *cobra.Command {
-	var workspaceFlag, spaceFlag string
+	var workspaceFlag, spaceFlag, listFlag string
 
 	cmd := &cobra.Command{
 		Use:   "browse",
@@ -32,7 +32,7 @@ func newBrowseCmd() *cobra.Command {
 			hierarchySvc := app.NewHierarchyService(client)
 			taskSvc := app.NewTaskService(client)
 
-			opts := resolveLaunchOptions(workspaceFlag, spaceFlag)
+			opts := resolveLaunchOptions(workspaceFlag, spaceFlag, listFlag)
 
 			tuiApp := tui.New(hierarchySvc, taskSvc, logger, opts)
 			return tuiApp.Run(cmd.Context())
@@ -41,13 +41,14 @@ func newBrowseCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace (team) ID to navigate to on launch")
 	cmd.Flags().StringVar(&spaceFlag, "space", "", "space ID to navigate to on launch (requires --workspace)")
+	cmd.Flags().StringVar(&listFlag, "list", "", "list ID to load tasks for on launch (requires --workspace and --space)")
 
 	return cmd
 }
 
 // resolveLaunchOptions merges CLI flags over profile config values. Flags take
 // precedence; when absent, values from the active profile are used.
-func resolveLaunchOptions(workspaceFlag, spaceFlag string) tui.LaunchOptions {
+func resolveLaunchOptions(workspaceFlag, spaceFlag, listFlag string) tui.LaunchOptions {
 	var opts tui.LaunchOptions
 
 	// Load profile defaults — errors are non-fatal; the TUI works without them.
@@ -55,6 +56,7 @@ func resolveLaunchOptions(workspaceFlag, spaceFlag string) tui.LaunchOptions {
 		if p, err := cfg.Active(); err == nil {
 			opts.WorkspaceID = p.WorkspaceID
 			opts.SpaceID = p.SpaceID
+			opts.ListID = p.ListID
 		}
 	}
 
@@ -65,10 +67,19 @@ func resolveLaunchOptions(workspaceFlag, spaceFlag string) tui.LaunchOptions {
 	if spaceFlag != "" {
 		opts.SpaceID = spaceFlag
 	}
+	if listFlag != "" {
+		opts.ListID = listFlag
+	}
 
-	// SpaceID without WorkspaceID is meaningless — clear it.
+	// SpaceID without WorkspaceID is meaningless — clear it and any dependent IDs.
 	if opts.WorkspaceID == "" {
 		opts.SpaceID = ""
+		opts.ListID = ""
+	}
+
+	// ListID without SpaceID is meaningless — clear it.
+	if opts.SpaceID == "" {
+		opts.ListID = ""
 	}
 
 	return opts
