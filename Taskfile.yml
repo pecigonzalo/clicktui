@@ -88,9 +88,9 @@ tasks:
   schema:
     desc: Validate that config.schema.json is well-formed JSON Schema
     cmds:
-      - python3 -c "import json; json.load(open('config.schema.json')); print('config.schema.json is valid JSON')"
+      - python3 -c "import json; json.load(open('internal/config/config.schema.json')); print('internal/config/config.schema.json is valid JSON')"
     sources:
-      - config.schema.json
+      - internal/config/config.schema.json
 
   release:snapshot:
     desc: Build a snapshot release locally (no publish)

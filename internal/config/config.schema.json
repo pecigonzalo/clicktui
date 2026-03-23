@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "clicktui configuration",
+  "description": "Configuration file for clicktui, a terminal UI for ClickUp.",
+  "type": "object",
+  "properties": {
+    "active_profile": {
+      "type": "string",
+      "default": "default",
+      "description": "Name of the currently active profile."
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Map of profile names to profile configurations.",
+      "additionalProperties": {
+        "$ref": "#/$defs/profile"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "description": "A named profile containing authentication and workspace settings.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Profile identifier, must match the map key."
+        },
+        "auth_method": {
+          "type": "string",
+          "enum": ["personal_token", "oauth"],
+          "description": "Authentication mechanism: 'personal_token' for API token, 'oauth' for OAuth 2.0."
+        },
+        "workspace_id": {
+          "type": "string",
+          "description": "ClickUp workspace (team) ID to use by default."
+        },
+        "space_id": {
+          "type": "string",
+          "description": "ClickUp space ID to navigate to on launch."
+        },
+        "list_id": {
+          "type": "string",
+          "description": "ClickUp list ID for direct navigation. Requires workspace_id and space_id to also be set."
+        }
+      },
+      "required": ["name", "auth_method"],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "name": "default",
+          "auth_method": "personal_token",
+          "workspace_id": "12345678",
+          "space_id": "87654321"
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "active_profile": "default",
+      "profiles": {
+        "default": {
+          "name": "default",
+          "auth_method": "personal_token",
+          "workspace_id": "12345678",
+          "space_id": "87654321"
+        }
+      }
+    }
+  ]
+}

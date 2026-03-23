@@ -2,6 +2,7 @@
 package config
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,15 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed config.schema.json
+var schemaJSON []byte
+
+// schemaFile is the filename written alongside config.yaml for editor hints.
+const schemaFile = "config.schema.json"
+
+// yamlLSPComment is the yaml-language-server modeline prepended to config.yaml.
+const yamlLSPComment = "# yaml-language-server: $schema=config.schema.json\n"
 
 // AuthMethod identifies the authentication mechanism used by a profile.
 type AuthMethod string
@@ -156,6 +166,8 @@ func Load() (*Config, error) {
 }
 
 // saveToPath marshals cfg to YAML and writes it to the given path.
+// The output is prefixed with a yaml-language-server modeline that references
+// the co-located config.schema.json file.
 func saveToPath(cfg *Config, path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
@@ -166,8 +178,10 @@ func saveToPath(cfg *Config, path string) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	// Ensure the file ends with a single trailing newline.
-	out := strings.TrimRight(string(data), "\n") + "\n"
+	// Ensure the file ends with a single trailing newline and prepend the
+	// yaml-language-server modeline so editors pick up the co-located schema.
+	body := strings.TrimRight(string(data), "\n") + "\n"
+	out := yamlLSPComment + "\n" + body
 
 	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
@@ -176,10 +190,19 @@ func saveToPath(cfg *Config, path string) error {
 }
 
 // Save persists cfg to ConfigFilePath, creating the directory if needed.
+// It also writes the embedded config.schema.json alongside config.yaml so that
+// editors with the YAML Language Server extension can provide inline validation.
 func Save(cfg *Config) error {
 	path, err := ConfigFilePath()
 	if err != nil {
 		return err
 	}
-	return saveToPath(cfg, path)
+	if err := saveToPath(cfg, path); err != nil {
+		return err
+	}
+	schemaPath := filepath.Join(filepath.Dir(path), schemaFile)
+	if err := os.WriteFile(schemaPath, schemaJSON, 0o600); err != nil {
+		return fmt.Errorf("write config schema: %w", err)
+	}
+	return nil
 }

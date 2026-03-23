@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -128,6 +129,87 @@ func TestSave_And_Load(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ws42", p.WorkspaceID)
 	assert.Equal(t, config.AuthMethodPersonalToken, p.AuthMethod)
+}
+
+func TestSave_WritesSchemaFile(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+
+	cfg := config.New()
+	cfg.SetProfile(&config.Profile{
+		Name:       "default",
+		AuthMethod: config.AuthMethodPersonalToken,
+	})
+	require.NoError(t, config.Save(cfg))
+
+	cfgDir, err := config.ConfigDir()
+	require.NoError(t, err)
+
+	// config.schema.json should exist alongside config.yaml.
+	schemaPath := filepath.Join(cfgDir, "config.schema.json")
+	info, err := os.Stat(schemaPath)
+	require.NoError(t, err, "config.schema.json should be written by Save()")
+	assert.Greater(t, info.Size(), int64(0), "config.schema.json should not be empty")
+
+	// The schema file must be valid JSON.
+	raw, err := os.ReadFile(schemaPath)
+	require.NoError(t, err)
+	var schemaObj map[string]any
+	require.NoError(t, json.Unmarshal(raw, &schemaObj), "config.schema.json must be valid JSON")
+}
+
+func TestSave_PrependsYAMLLSPComment(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+
+	cfg := config.New()
+	cfg.SetProfile(&config.Profile{
+		Name:       "default",
+		AuthMethod: config.AuthMethodPersonalToken,
+	})
+	require.NoError(t, config.Save(cfg))
+
+	cfgPath, err := config.ConfigFilePath()
+	require.NoError(t, err)
+
+	raw, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	content := string(raw)
+
+	const wantComment = "# yaml-language-server: $schema=config.schema.json"
+	assert.True(t, strings.HasPrefix(content, wantComment), "config.yaml should start with the yaml-language-server modeline")
+}
+
+func TestSave_SchemaComment_SurvivesRoundTrip(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+
+	cfg := config.New()
+	cfg.SetProfile(&config.Profile{
+		Name:        "default",
+		AuthMethod:  config.AuthMethodPersonalToken,
+		WorkspaceID: "ws-round",
+	})
+	require.NoError(t, config.Save(cfg))
+
+	// Load should ignore YAML comments naturally.
+	loaded, err := config.Load()
+	require.NoError(t, err)
+
+	// Save again — comment must still be present.
+	require.NoError(t, config.Save(loaded))
+
+	cfgPath, err := config.ConfigFilePath()
+	require.NoError(t, err)
+	raw, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+
+	const wantComment = "# yaml-language-server: $schema=config.schema.json"
+	assert.True(t, strings.HasPrefix(string(raw), wantComment), "comment should survive a save → load → save cycle")
+
+	// Data integrity must be preserved.
+	loaded2, err := config.Load()
+	require.NoError(t, err)
+	p, err := loaded2.Profile("default")
+	require.NoError(t, err)
+	assert.Equal(t, "ws-round", p.WorkspaceID)
 }
 
 func TestLoad_InvalidYAML_ReturnsError(t *testing.T) {
