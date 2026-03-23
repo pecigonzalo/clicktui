@@ -206,18 +206,26 @@ func (a *App) setTreeVisible(visible bool) {
 }
 
 // Run starts the TUI event loop. It blocks until the application exits.
+//
+// The initial data load runs in a goroutine launched just before the blocking
+// tviewApp.Run() call. This avoids a deadlock: the load helpers call
+// QueueUpdateDraw which blocks until the event loop is running, so the
+// goroutine must be started before Run() takes over the main goroutine.
 func (a *App) Run(ctx context.Context) error {
+	// Set the loading status directly (no event loop needed for this).
 	switch {
 	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "":
 		a.footer.SetStatusLoading("Navigating to space…")
-		a.autoNavToSpace(ctx, a.launch.WorkspaceID, a.launch.SpaceID)
 	case a.launch.WorkspaceID != "":
 		a.footer.SetStatusLoading("Loading spaces…")
-		a.autoNavToWorkspace(ctx, a.launch.WorkspaceID)
 	default:
 		a.footer.SetStatusLoading("Loading workspaces…")
-		a.loadWorkspaces(ctx)
 	}
+
+	// Launch initial load in a background goroutine. The QueueUpdateDraw
+	// calls inside will block briefly until tviewApp.Run() starts below.
+	go a.initialLoad(ctx)
+
 	return a.tviewApp.Run()
 }
 
@@ -231,66 +239,77 @@ func (a *App) setError(format string, args ...any) {
 	a.footer.SetStatusError(format, args...)
 }
 
-func (a *App) loadWorkspaces(ctx context.Context) {
-	go func() {
-		nodes, err := a.hierarchy.LoadWorkspaces(ctx)
-		a.tviewApp.QueueUpdateDraw(func() {
-			if err != nil {
-				a.logger.Error("load workspaces", "error", err)
-				a.setError("failed to load workspaces: %v", err)
-				return
-			}
-			a.tree.SetWorkspaces(ctx, nodes)
-			a.footer.SetStatusReady("Ready")
-		})
-	}()
+// initialLoad dispatches the correct initial data load based on launch options.
+// It runs synchronously (blocking on API calls + QueueUpdateDraw) and must be
+// called from a goroutine — never from the main goroutine before tviewApp.Run().
+func (a *App) initialLoad(ctx context.Context) {
+	switch {
+	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "":
+		a.doAutoNavToSpace(ctx, a.launch.WorkspaceID, a.launch.SpaceID)
+	case a.launch.WorkspaceID != "":
+		a.doAutoNavToWorkspace(ctx, a.launch.WorkspaceID)
+	default:
+		a.doLoadWorkspaces(ctx)
+	}
 }
 
-// autoNavToWorkspace loads spaces for a single workspace and shows them in the
-// tree. The user still picks a space manually.
-func (a *App) autoNavToWorkspace(ctx context.Context, workspaceID string) {
-	go func() {
-		spaces, err := a.hierarchy.LoadSpaces(ctx, workspaceID)
-		a.tviewApp.QueueUpdateDraw(func() {
-			if err != nil {
-				a.logger.Error("auto-nav: load spaces", "workspace", workspaceID, "error", err)
-				a.setError("load spaces: %v", err)
-				return
-			}
-			a.tree.SetSpaces(ctx, workspaceID, spaces)
-			a.footer.SetStatusReady("Ready")
-		})
-	}()
+// doLoadWorkspaces fetches workspaces and updates the tree. It blocks until the
+// API call and UI update are complete.
+func (a *App) doLoadWorkspaces(ctx context.Context) {
+	nodes, err := a.hierarchy.LoadWorkspaces(ctx)
+	a.tviewApp.QueueUpdateDraw(func() {
+		if err != nil {
+			a.logger.Error("load workspaces", "error", err)
+			a.setError("failed to load workspaces: %v", err)
+			return
+		}
+		a.tree.SetWorkspaces(ctx, nodes)
+		a.footer.SetStatusReady("Ready")
+	})
 }
 
-// autoNavToSpace loads a specific space's contents (folders/lists), expands it
-// in the tree, and collapses the tree pane so the task list is prominent.
-func (a *App) autoNavToSpace(ctx context.Context, workspaceID, spaceID string) {
-	go func() {
-		// Load spaces to find the target space name, then load its contents.
-		spaces, err := a.hierarchy.LoadSpaces(ctx, workspaceID)
+// doAutoNavToWorkspace fetches spaces for a workspace and updates the tree.
+// It blocks until the API call and UI update are complete.
+func (a *App) doAutoNavToWorkspace(ctx context.Context, workspaceID string) {
+	spaces, err := a.hierarchy.LoadSpaces(ctx, workspaceID)
+	a.tviewApp.QueueUpdateDraw(func() {
 		if err != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.logger.Error("auto-nav: load spaces", "workspace", workspaceID, "error", err)
-				a.setError("load spaces: %v", err)
-			})
+			a.logger.Error("auto-nav: load spaces", "workspace", workspaceID, "error", err)
+			a.setError("load spaces: %v", err)
 			return
 		}
+		a.tree.SetSpaces(ctx, workspaceID, spaces)
+		a.footer.SetStatusReady("Ready")
+	})
+}
 
-		contents, err := a.hierarchy.LoadSpaceContents(ctx, spaceID)
-		if err != nil {
-			a.tviewApp.QueueUpdateDraw(func() {
-				a.logger.Error("auto-nav: load space contents", "space", spaceID, "error", err)
-				a.setError("load space contents: %v", err)
-			})
-			return
-		}
-
+// doAutoNavToSpace loads spaces and a specific space's contents, then updates
+// the tree and collapses it. It blocks until all API calls and UI updates are
+// complete.
+func (a *App) doAutoNavToSpace(ctx context.Context, workspaceID, spaceID string) {
+	// Load spaces to find the target space name, then load its contents.
+	spaces, err := a.hierarchy.LoadSpaces(ctx, workspaceID)
+	if err != nil {
 		a.tviewApp.QueueUpdateDraw(func() {
-			a.tree.SetSpacesAndExpand(ctx, workspaceID, spaces, spaceID, contents)
-			a.setTreeVisible(false)
-			a.setFocusPane(paneTaskList)
-			a.footer.SetStatusReady("Ready")
+			a.logger.Error("auto-nav: load spaces", "workspace", workspaceID, "error", err)
+			a.setError("load spaces: %v", err)
 		})
-	}()
+		return
+	}
+
+	contents, err := a.hierarchy.LoadSpaceContents(ctx, spaceID)
+	if err != nil {
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.logger.Error("auto-nav: load space contents", "space", spaceID, "error", err)
+			a.setError("load space contents: %v", err)
+		})
+		return
+	}
+
+	a.tviewApp.QueueUpdateDraw(func() {
+		a.tree.SetSpacesAndExpand(ctx, workspaceID, spaces, spaceID, contents)
+		a.setTreeVisible(false)
+		a.setFocusPane(paneTaskList)
+		a.footer.SetStatusReady("Ready")
+	})
 }
