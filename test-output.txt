@@ -1,7 +1,0 @@
-?   	github.com/pecigonzalo/clicktui/cmd/clicktui	[no test files]
-ok  	github.com/pecigonzalo/clicktui/internal/app	0.826s
-ok  	github.com/pecigonzalo/clicktui/internal/auth	0.323s
-?   	github.com/pecigonzalo/clicktui/internal/cli	[no test files]
-ok  	github.com/pecigonzalo/clicktui/internal/clickup	1.058s
-ok  	github.com/pecigonzalo/clicktui/internal/config	1.128s
-?   	github.com/pecigonzalo/clicktui/internal/tui	[no test files]
