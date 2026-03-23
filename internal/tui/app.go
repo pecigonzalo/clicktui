@@ -10,7 +10,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/gdamore/tcell/v2"
@@ -20,6 +19,15 @@ import (
 )
 
 const pageMain = "main"
+
+// paneID identifies which pane has focus.
+type paneID int
+
+const (
+	paneTree paneID = iota
+	paneTaskList
+	paneTaskDetail
+)
 
 // App is the main TUI application.
 type App struct {
@@ -31,7 +39,9 @@ type App struct {
 	tree       *TreePane
 	taskList   *TaskListPane
 	taskDetail *TaskDetailPane
-	statusBar  *tview.TextView
+	footer     *Footer
+	// paneStylers maps paneID to the chrome controller for that pane.
+	paneStylers [3]*PaneStyler
 	// focusOrder tracks the panes for Tab cycling.
 	focusOrder []tview.Primitive
 	focusIdx   int
@@ -53,26 +63,44 @@ func (a *App) buildLayout() {
 	a.tree = NewTreePane(a)
 	a.taskList = NewTaskListPane(a)
 	a.taskDetail = NewTaskDetailPane(a)
-	a.statusBar = tview.NewTextView().
-		SetDynamicColors(true).
-		SetText("[yellow]Loading workspaces...")
+	a.footer = newFooter()
+
+	// Register pane chrome controllers so we can update focus styling.
+	// Each tview widget exposes its embedded *Box via the promoted .Box field.
+	a.paneStylers[paneTree] = newPaneStyler(a.tree.Box, "Hierarchy")
+	a.paneStylers[paneTaskList] = newPaneStyler(a.taskList.Box, "Tasks")
+	a.paneStylers[paneTaskDetail] = newPaneStyler(a.taskDetail.Box, "Detail")
+
+	// Apply initial border + title styles.
+	a.paneStylers[paneTree].SetFocused()
+	a.paneStylers[paneTaskList].SetInactive()
+	a.paneStylers[paneTaskDetail].SetInactive()
 
 	panes := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(a.tree.TreeView, 0, 1, true).
-		AddItem(a.taskList.Table, 0, 2, false).
-		AddItem(a.taskDetail.TextView, 0, 2, false)
+		AddItem(a.tree, 0, 1, true).
+		AddItem(a.taskList, 0, 2, false).
+		AddItem(a.taskDetail, 0, 2, false)
 
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(panes, 0, 1, true).
-		AddItem(a.statusBar, 1, 0, false)
+		AddItem(a.footer, 1, 0, false)
 
 	a.pages = tview.NewPages().AddPage(pageMain, mainLayout, true, true)
 
 	a.focusOrder = []tview.Primitive{
-		a.tree.TreeView,
-		a.taskList.Table,
-		a.taskDetail.TextView,
+		a.tree,
+		a.taskList,
+		a.taskDetail,
 	}
+
+	// Set global help that applies when no task is selected.
+	a.footer.SetHelp(
+		"Tab:next pane",
+		"Shift+Tab:prev pane",
+		"Enter:select",
+		"s:update status",
+		"q:quit",
+	)
 
 	a.tviewApp.SetRoot(a.pages, true)
 	a.tviewApp.SetInputCapture(a.globalInputHandler)
@@ -96,25 +124,31 @@ func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (a *App) cycleFocus(delta int) {
+	prev := paneID(a.focusIdx)
 	a.focusIdx = (a.focusIdx + delta + len(a.focusOrder)) % len(a.focusOrder)
+	next := paneID(a.focusIdx)
+
+	a.paneStylers[prev].SetInactive()
+	a.paneStylers[next].SetFocused()
+
 	a.tviewApp.SetFocus(a.focusOrder[a.focusIdx])
 }
 
 // Run starts the TUI event loop. It blocks until the application exits.
 func (a *App) Run(ctx context.Context) error {
+	a.footer.SetStatusLoading("Loading workspaces…")
 	a.loadWorkspaces(ctx)
 	return a.tviewApp.Run()
 }
 
-// setStatus updates the status bar text (must be called from the UI goroutine
-// or via QueueUpdateDraw).
-func (a *App) setStatus(format string, args ...any) {
-	a.statusBar.SetText(fmt.Sprintf("[yellow]"+format, args...))
+// setStatusLoading shows a yellow loading message in the footer.
+func (a *App) setStatusLoading(format string, args ...any) {
+	a.footer.SetStatusLoading(format, args...)
 }
 
-// setError shows an error in the status bar.
+// setError shows a red error message in the footer.
 func (a *App) setError(format string, args ...any) {
-	a.statusBar.SetText(fmt.Sprintf("[red]Error: "+format, args...))
+	a.footer.SetStatusError(format, args...)
 }
 
 func (a *App) loadWorkspaces(ctx context.Context) {
@@ -127,7 +161,7 @@ func (a *App) loadWorkspaces(ctx context.Context) {
 				return
 			}
 			a.tree.SetWorkspaces(ctx, nodes)
-			a.setStatus("Ready — select a list, press s to update status. Tab switches panes, q quits.")
+			a.footer.SetStatusReady("Ready")
 		})
 	}()
 }

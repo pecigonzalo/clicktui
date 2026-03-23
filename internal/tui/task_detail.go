@@ -29,8 +29,8 @@ func NewTaskDetailPane(a *App) *TaskDetailPane {
 		SetDynamicColors(true).
 		SetWordWrap(true).
 		SetScrollable(true)
-	tv.SetBorder(true).SetTitle(" Task Details ").SetBorderColor(tcell.ColorDarkCyan)
-	tv.SetText("[darkgray]Select a task to view details")
+	tv.SetBorder(true)
+	tv.SetText(emptyText("Select a task to view details"))
 
 	tdp := &TaskDetailPane{TextView: tv, tuiApp: a}
 	tv.SetInputCapture(tdp.inputHandler)
@@ -49,8 +49,8 @@ func (td *TaskDetailPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 
 // LoadDetail fetches and renders a task's full details.
 func (td *TaskDetailPane) LoadDetail(taskID string) {
-	td.SetText("[yellow]Loading task details...")
-	td.tuiApp.setStatus("Loading task %s...", taskID)
+	td.SetText(loadingText("Loading task details…"))
+	td.tuiApp.setStatusLoading("Loading task %s…", taskID)
 
 	ctx := context.Background()
 	go func() {
@@ -59,14 +59,14 @@ func (td *TaskDetailPane) LoadDetail(taskID string) {
 			if err != nil {
 				td.tuiApp.logger.Error("load task detail", "task", taskID, "error", err)
 				td.tuiApp.setError("load task detail: %v", err)
-				td.SetText(fmt.Sprintf("[red]Error: %v", err))
+				td.SetText(errorText(fmt.Sprintf("load task detail: %v", err)))
 				return
 			}
 			td.taskID = detail.ID
 			td.listID = detail.ListID
 			td.taskName = detail.Name
 			td.render(detail)
-			td.tuiApp.setStatus("Viewing task %s — press s to update status", detail.ID)
+			td.tuiApp.footer.SetStatusReady(fmt.Sprintf("Viewing: %s", detail.Name))
 		})
 	}()
 }
@@ -74,7 +74,7 @@ func (td *TaskDetailPane) LoadDetail(taskID string) {
 // openStatusPicker loads available statuses from the list and displays a modal
 // selection list.  Must be called from the UI goroutine.
 func (td *TaskDetailPane) openStatusPicker() {
-	td.tuiApp.setStatus("Loading statuses...")
+	td.tuiApp.setStatusLoading("Loading statuses…")
 	taskID := td.taskID
 	listID := td.listID
 
@@ -101,8 +101,9 @@ func (td *TaskDetailPane) openStatusPicker() {
 func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOption) {
 	list := tview.NewList()
 	list.SetBorder(true).
-		SetTitle(" Choose Status (Esc to cancel) ").
-		SetBorderColor(tcell.ColorDarkCyan)
+		SetTitle(" Update Status ").
+		SetBorderColor(ColorBorderFocused).
+		SetTitleColor(ColorTitleFocused)
 	list.ShowSecondaryText(false)
 
 	for _, s := range statuses {
@@ -119,14 +120,17 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 		if event.Key() == tcell.KeyEscape {
 			td.tuiApp.pages.RemovePage(pageStatusPicker)
 			td.tuiApp.tviewApp.SetFocus(td.tuiApp.taskDetail.TextView)
-			td.tuiApp.setStatus("Status update cancelled")
+			td.tuiApp.footer.SetStatusReady("Status update cancelled")
 			return nil
 		}
 		return event
 	})
 
+	// Hint in footer while modal is open.
+	td.tuiApp.footer.SetHelp("Enter:select", "Esc:cancel")
+
 	// Centre the modal: fixed width/height over the main content.
-	modal := centreModal(list, 40, len(statuses)+4)
+	modal := centreModal(list, 44, len(statuses)+4)
 	td.tuiApp.pages.AddPage(pageStatusPicker, modal, true, true)
 	td.tuiApp.tviewApp.SetFocus(list)
 }
@@ -145,7 +149,7 @@ func centreModal(p tview.Primitive, width, height int) tview.Primitive {
 
 // applyStatusUpdate calls the service and refreshes the panes.
 func (td *TaskDetailPane) applyStatusUpdate(taskID, status string) {
-	td.tuiApp.setStatus("Updating status to %q...", status)
+	td.tuiApp.setStatusLoading("Updating status to %q…", status)
 
 	ctx := context.Background()
 	go func() {
@@ -161,65 +165,120 @@ func (td *TaskDetailPane) applyStatusUpdate(taskID, status string) {
 			td.listID = detail.ListID
 			td.taskName = detail.Name
 			td.render(detail)
-			td.tuiApp.setStatus("Status updated to %q", status)
+			td.tuiApp.footer.SetStatusReady(fmt.Sprintf("Status → %q", status))
 
 			// Refresh the task list so the status column reflects the change.
 			td.tuiApp.taskList.refreshCurrentTask(taskID, detail.Status)
+
+			// Restore default help keys.
+			td.tuiApp.footer.SetHelp(
+				"Tab:next pane",
+				"Shift+Tab:prev pane",
+				"Enter:select",
+				"s:update status",
+				"q:quit",
+			)
 		})
 	}()
+}
+
+// label returns a right-padded label for the detail pane field grid.
+func label(s string) string {
+	const width = 10
+	if len(s) < width {
+		s += strings.Repeat(" ", width-len(s))
+	}
+	return s
 }
 
 func (td *TaskDetailPane) render(d *app.TaskDetail) {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "[yellow]%s[-]\n", tview.Escape(d.Name))
-	fmt.Fprintf(&b, "[darkgray]ID: %s[-]", d.ID)
+	// ── Title block ─────────────────────────────────────────────────────────
+	fmt.Fprintf(&b, "[white::b]%s[-:-:-]\n", tview.Escape(d.Name))
+	fmt.Fprintf(&b, "%s%s[-]", tagColor(ColorTextSubtle), tview.Escape(d.ID))
 	if d.CustomID != "" {
-		fmt.Fprintf(&b, "  [darkgray]Custom: %s[-]", d.CustomID)
+		fmt.Fprintf(&b, "  %s%s[-]", tagColor(ColorTextSubtle), tview.Escape(d.CustomID))
 	}
 	b.WriteString("\n\n")
 
-	fmt.Fprintf(&b, "[white]Status:    [aqua]%s[-]\n", tview.Escape(d.Status))
-	fmt.Fprintf(&b, "[white]Priority:  [green]%s[-]\n", tview.Escape(d.Priority))
+	// ── Core fields ──────────────────────────────────────────────────────────
+	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+		tagColor(ColorDetailLabel), label("Status"),
+		tagColor(ColorBadgeStatus), tview.Escape(d.Status))
+	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+		tagColor(ColorDetailLabel), label("Priority"),
+		tagColor(priorityColor(d.Priority)), tview.Escape(d.Priority))
 
 	if len(d.Assignees) > 0 {
-		fmt.Fprintf(&b, "[white]Assignees: [white]%s[-]\n", tview.Escape(strings.Join(d.Assignees, ", ")))
+		fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+			tagColor(ColorDetailLabel), label("Assignees"),
+			tagColor(ColorDetailValue), tview.Escape(strings.Join(d.Assignees, ", ")))
 	}
 	if len(d.Tags) > 0 {
-		fmt.Fprintf(&b, "[white]Tags:      [white]%s[-]\n", tview.Escape(strings.Join(d.Tags, ", ")))
+		fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+			tagColor(ColorDetailLabel), label("Tags"),
+			tagColor(ColorDetailValue), tview.Escape(strings.Join(d.Tags, ", ")))
 	}
 
-	b.WriteString("\n")
-	if d.DueDate != "" {
-		fmt.Fprintf(&b, "[white]Due:       %s\n", d.DueDate)
-	}
-	if d.StartDate != "" {
-		fmt.Fprintf(&b, "[white]Start:     %s\n", d.StartDate)
-	}
-	if d.DateCreated != "" {
-		fmt.Fprintf(&b, "[white]Created:   %s\n", d.DateCreated)
-	}
-	if d.DateUpdated != "" {
-		fmt.Fprintf(&b, "[white]Updated:   %s\n", d.DateUpdated)
+	// ── Dates ────────────────────────────────────────────────────────────────
+	hasDates := d.DueDate != "" || d.StartDate != "" || d.DateCreated != "" || d.DateUpdated != ""
+	if hasDates {
+		b.WriteString("\n")
+		if d.DueDate != "" {
+			fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+				tagColor(ColorDetailLabel), label("Due"),
+				tagColor(ColorDetailValue), d.DueDate)
+		}
+		if d.StartDate != "" {
+			fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+				tagColor(ColorDetailLabel), label("Start"),
+				tagColor(ColorDetailValue), d.StartDate)
+		}
+		if d.DateCreated != "" {
+			fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+				tagColor(ColorDetailLabel), label("Created"),
+				tagColor(ColorDetailValue), d.DateCreated)
+		}
+		if d.DateUpdated != "" {
+			fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+				tagColor(ColorDetailLabel), label("Updated"),
+				tagColor(ColorDetailValue), d.DateUpdated)
+		}
 	}
 
+	// ── Location ─────────────────────────────────────────────────────────────
 	b.WriteString("\n")
-	fmt.Fprintf(&b, "[white]Space:     %s\n", tview.Escape(d.Space))
-	fmt.Fprintf(&b, "[white]Folder:    %s\n", tview.Escape(d.Folder))
-	fmt.Fprintf(&b, "[white]List:      %s\n", tview.Escape(d.List))
+	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+		tagColor(ColorDetailLabel), label("Space"),
+		tagColor(ColorDetailValue), tview.Escape(d.Space))
+	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+		tagColor(ColorDetailLabel), label("Folder"),
+		tagColor(ColorDetailValue), tview.Escape(d.Folder))
+	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+		tagColor(ColorDetailLabel), label("List"),
+		tagColor(ColorDetailValue), tview.Escape(d.List))
 	if d.Parent != "" {
-		fmt.Fprintf(&b, "[white]Parent:    %s\n", d.Parent)
+		fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
+			tagColor(ColorDetailLabel), label("Parent"),
+			tagColor(ColorDetailValue), d.Parent)
 	}
 
+	// ── URL ──────────────────────────────────────────────────────────────────
 	if d.URL != "" {
-		fmt.Fprintf(&b, "\n[darkgray]%s[-]\n", d.URL)
+		fmt.Fprintf(&b, "\n%s%s[-]\n", tagColor(ColorTextSubtle), d.URL)
 	}
 
+	// ── Description ──────────────────────────────────────────────────────────
 	if d.Description != "" {
-		fmt.Fprintf(&b, "\n[white]─── Description ───[-]\n%s\n", tview.Escape(d.Description))
+		fmt.Fprintf(&b, "\n%s── Description ──[-]\n%s%s[-]\n",
+			tagColor(ColorDetailLabel),
+			tagColor(ColorDetailValue),
+			tview.Escape(d.Description))
 	}
 
-	fmt.Fprintf(&b, "\n[darkgray]Press s to update status[-]")
+	// ── Footer hint ──────────────────────────────────────────────────────────
+	fmt.Fprintf(&b, "\n%s[s] update status[-]", tagColor(ColorTextSubtle))
 
 	td.SetText(b.String())
 	td.ScrollToBeginning()

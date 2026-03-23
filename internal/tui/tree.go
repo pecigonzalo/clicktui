@@ -20,9 +20,9 @@ type TreePane struct {
 
 // NewTreePane creates an empty hierarchy tree.
 func NewTreePane(a *App) *TreePane {
-	root := tview.NewTreeNode("Workspaces").SetColor(tcell.ColorWhite)
+	root := tview.NewTreeNode("Workspaces").SetColor(ColorNodeWorkspace)
 	tree := tview.NewTreeView().SetRoot(root).SetCurrentNode(root)
-	tree.SetBorder(true).SetTitle(" Hierarchy ").SetBorderColor(tcell.ColorDarkCyan)
+	tree.SetBorder(true)
 
 	tp := &TreePane{
 		TreeView: tree,
@@ -40,7 +40,7 @@ func (tp *TreePane) SetWorkspaces(ctx context.Context, nodes []*app.HierarchyNod
 	for _, n := range nodes {
 		child := tp.makeTreeNode(n)
 		// Add a placeholder so the node is expandable.
-		child.AddChild(tview.NewTreeNode("Loading...").SetColor(tcell.ColorDarkGray))
+		child.AddChild(tview.NewTreeNode("Loading…").SetColor(ColorTextSubtle))
 		tp.root.AddChild(child)
 	}
 }
@@ -72,8 +72,8 @@ func (tp *TreePane) expandWorkspace(node *tview.TreeNode, ref *app.HierarchyNode
 	}
 
 	node.ClearChildren()
-	node.AddChild(tview.NewTreeNode("Loading spaces...").SetColor(tcell.ColorDarkGray))
-	tp.app.setStatus("Loading spaces...")
+	node.AddChild(tview.NewTreeNode("Loading spaces…").SetColor(ColorTextSubtle))
+	tp.app.setStatusLoading("Loading spaces…")
 
 	ctx := context.Background()
 	go func() {
@@ -90,11 +90,11 @@ func (tp *TreePane) expandWorkspace(node *tview.TreeNode, ref *app.HierarchyNode
 			ref.Loaded = true
 			for _, c := range children {
 				child := tp.makeTreeNode(c)
-				child.AddChild(tview.NewTreeNode("Loading...").SetColor(tcell.ColorDarkGray))
+				child.AddChild(tview.NewTreeNode("Loading…").SetColor(ColorTextSubtle))
 				node.AddChild(child)
 			}
 			node.SetExpanded(true)
-			tp.app.setStatus("Ready")
+			tp.app.footer.SetStatusReady("Ready")
 		})
 	}()
 }
@@ -106,8 +106,8 @@ func (tp *TreePane) expandSpace(node *tview.TreeNode, ref *app.HierarchyNode) {
 	}
 
 	node.ClearChildren()
-	node.AddChild(tview.NewTreeNode("Loading contents...").SetColor(tcell.ColorDarkGray))
-	tp.app.setStatus("Loading folders and lists...")
+	node.AddChild(tview.NewTreeNode("Loading contents…").SetColor(ColorTextSubtle))
+	tp.app.setStatusLoading("Loading folders and lists…")
 
 	ctx := context.Background()
 	go func() {
@@ -132,7 +132,7 @@ func (tp *TreePane) expandSpace(node *tview.TreeNode, ref *app.HierarchyNode) {
 				node.AddChild(child)
 			}
 			node.SetExpanded(true)
-			tp.app.setStatus("Ready")
+			tp.app.footer.SetStatusReady("Ready")
 		})
 	}()
 }
@@ -143,23 +143,22 @@ func (tp *TreePane) selectList(ref *app.HierarchyNode) {
 
 func (tp *TreePane) makeTreeNode(n *app.HierarchyNode) *tview.TreeNode {
 	prefix := nodePrefix(n.Kind)
-	node := tview.NewTreeNode(prefix + n.Name).
+	return tview.NewTreeNode(prefix + n.Name).
 		SetReference(n).
 		SetColor(nodeColor(n.Kind)).
 		SetSelectable(true)
-	return node
 }
 
 func nodePrefix(k app.NodeKind) string {
 	switch k {
 	case app.NodeWorkspace:
-		return "W: "
+		return "  "
 	case app.NodeSpace:
-		return "S: "
+		return "  ∙ "
 	case app.NodeFolder:
-		return "F: "
+		return "    ▸ "
 	case app.NodeList:
-		return "L: "
+		return "      "
 	default:
 		return ""
 	}
@@ -168,14 +167,14 @@ func nodePrefix(k app.NodeKind) string {
 func nodeColor(k app.NodeKind) tcell.Color {
 	switch k {
 	case app.NodeWorkspace:
-		return tcell.ColorGold
+		return ColorNodeWorkspace
 	case app.NodeSpace:
-		return tcell.ColorDodgerBlue
+		return ColorNodeSpace
 	case app.NodeFolder:
-		return tcell.ColorLightGreen
+		return ColorNodeFolder
 	case app.NodeList:
-		return tcell.ColorWhite
+		return ColorNodeList
 	default:
-		return tcell.ColorWhite
+		return ColorText
 	}
 }

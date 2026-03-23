@@ -28,7 +28,7 @@ func NewTaskListPane(a *App) *TaskListPane {
 		SetBorders(false).
 		SetSelectable(true, false).
 		SetFixed(1, 0)
-	table.SetBorder(true).SetTitle(" Tasks ").SetBorderColor(tcell.ColorDarkCyan)
+	table.SetBorder(true)
 
 	tlp := &TaskListPane{
 		Table:  table,
@@ -54,7 +54,8 @@ func (tlp *TaskListPane) fetchPage() {
 		return
 	}
 	tlp.isLoading = true
-	tlp.tuiApp.setStatus("Loading tasks for %s (page %d)...", tlp.listName, tlp.page)
+	tlp.tuiApp.setStatusLoading("Loading tasks for %s (page %d)…", tlp.listName, tlp.page)
+	tlp.showLoading()
 
 	ctx := context.Background()
 	go func() {
@@ -74,9 +75,9 @@ func (tlp *TaskListPane) fetchPage() {
 			}
 			tlp.render()
 			if len(tasks) == 0 && tlp.page == 0 {
-				tlp.tuiApp.setStatus("No tasks in %s", tlp.listName)
+				tlp.tuiApp.footer.SetStatusReady(fmt.Sprintf("No tasks in %s", tlp.listName))
 			} else {
-				tlp.tuiApp.setStatus("%d tasks loaded for %s", len(tlp.tasks), tlp.listName)
+				tlp.tuiApp.footer.SetStatusReady(fmt.Sprintf("%d tasks in %s", len(tlp.tasks), tlp.listName))
 			}
 		})
 	}()
@@ -84,26 +85,36 @@ func (tlp *TaskListPane) fetchPage() {
 
 func (tlp *TaskListPane) render() {
 	tlp.Clear()
-	tlp.SetTitle(fmt.Sprintf(" Tasks — %s ", tlp.listName))
+	tlp.SetTitle(fmt.Sprintf(" %s ", tlp.listName))
 
 	// Header row.
-	headers := []string{"Status", "Name", "Priority"}
+	headers := []struct {
+		text      string
+		expansion int
+	}{
+		{"STATUS", 2},
+		{"TASK", 5},
+		{"PRIORITY", 2},
+	}
 	for i, h := range headers {
-		cell := tview.NewTableCell(h).
-			SetTextColor(tcell.ColorYellow).
+		tlp.SetCell(0, i, tview.NewTableCell(h.text).
+			SetTextColor(ColorTableHeader).
 			SetSelectable(false).
-			SetExpansion(1)
-		if i == 1 {
-			cell.SetExpansion(3)
-		}
-		tlp.SetCell(0, i, cell)
+			SetExpansion(h.expansion).
+			SetAttributes(tcell.AttrBold))
 	}
 
 	for i, t := range tlp.tasks {
 		row := i + 1
-		tlp.SetCell(row, 0, tview.NewTableCell(t.Status).SetTextColor(tcell.ColorAqua).SetExpansion(1))
-		tlp.SetCell(row, 1, tview.NewTableCell(t.Name).SetExpansion(3))
-		tlp.SetCell(row, 2, tview.NewTableCell(t.Priority).SetExpansion(1))
+		tlp.SetCell(row, 0, tview.NewTableCell(t.Status).
+			SetTextColor(ColorBadgeStatus).
+			SetExpansion(2))
+		tlp.SetCell(row, 1, tview.NewTableCell(t.Name).
+			SetTextColor(ColorText).
+			SetExpansion(5))
+		tlp.SetCell(row, 2, tview.NewTableCell(t.Priority).
+			SetTextColor(priorityColor(t.Priority)).
+			SetExpansion(2))
 	}
 
 	if len(tlp.tasks) > 0 {
@@ -113,7 +124,16 @@ func (tlp *TaskListPane) render() {
 
 func (tlp *TaskListPane) showEmpty(msg string) {
 	tlp.Clear()
-	tlp.SetCell(0, 0, tview.NewTableCell(msg).SetTextColor(tcell.ColorDarkGray).SetSelectable(false))
+	tlp.SetCell(0, 0, tview.NewTableCell(emptyText(msg)).
+		SetSelectable(false).
+		SetExpansion(1))
+}
+
+func (tlp *TaskListPane) showLoading() {
+	tlp.Clear()
+	tlp.SetCell(0, 0, tview.NewTableCell(loadingText("Loading tasks…")).
+		SetSelectable(false).
+		SetExpansion(1))
 }
 
 func (tlp *TaskListPane) onSelected(row, _ int) {
@@ -138,9 +158,7 @@ func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 		idx := row - 1
 		if idx >= 0 && idx < len(tlp.tasks) {
 			tlp.tuiApp.taskDetail.LoadDetail(tlp.tasks[idx].ID)
-			// Brief delay is not needed; LoadDetail will set up taskID/listID,
-			// but the status picker requires the detail pane to be populated.
-			// Instead, open the detail pane and let the user press s there.
+			// Open the detail pane and let the user press s there.
 			tlp.tuiApp.tviewApp.SetFocus(tlp.tuiApp.taskDetail.TextView)
 		}
 		return nil
@@ -155,7 +173,9 @@ func (tlp *TaskListPane) refreshCurrentTask(taskID, newStatus string) {
 		if t.ID == taskID {
 			tlp.tasks[i].Status = newStatus
 			row := i + 1 // header occupies row 0
-			tlp.SetCell(row, 0, tview.NewTableCell(newStatus).SetTextColor(tcell.ColorAqua).SetExpansion(1))
+			tlp.SetCell(row, 0, tview.NewTableCell(newStatus).
+				SetTextColor(ColorBadgeStatus).
+				SetExpansion(2))
 			return
 		}
 	}
