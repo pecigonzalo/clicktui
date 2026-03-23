@@ -1,0 +1,1 @@
+- Prefer `task` targets for format/lint/build
