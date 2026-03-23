@@ -11,6 +11,16 @@ output:
 pre-commit:
   parallel: true
   commands:
+    go-mod-tidy:
+      glob: "{go.mod,go.sum,*.go}"
+      run: |
+        go mod tidy
+        if ! git diff --quiet go.mod go.sum; then
+          echo "go.mod or go.sum is not tidy"
+          echo "Run 'go mod tidy' and commit the changes"
+          exit 1
+        fi
+
     lint:
       glob: "*.go"
       run: task lint
@@ -22,16 +32,6 @@ pre-commit:
     format-check:
       glob: "*.go"
       run: task format
-
-    go-mod-tidy:
-      glob: "{go.mod,go.sum,*.go}"
-      run: |
-        go mod tidy
-        if ! git diff --quiet go.mod go.sum; then
-          echo "go.mod or go.sum is not tidy"
-          echo "Run 'go mod tidy' and commit the changes"
-          exit 1
-        fi
 
 commit-msg:
   commands:
