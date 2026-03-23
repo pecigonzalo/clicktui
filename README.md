@@ -41,12 +41,28 @@ Multiple profiles are supported via the `--profile` flag:
 ./bin/clicktui --profile work auth status
 ```
 
+## Browsing
+
+Launch the TUI to browse your workspace hierarchy and tasks:
+
+```sh
+./bin/clicktui browse
+```
+
+**Controls:**
+- `Tab`/`Shift+Tab` — cycle between panes (hierarchy, task list, details)
+- `Enter` — expand tree nodes or select tasks
+- `n` — load next page of tasks (in task list pane)
+- `q` — quit
+
 ## Project layout
 
 ```
 cmd/clicktui/       entrypoint (thin main)
+internal/app/       business-logic services (hierarchy, tasks)
 internal/auth/      Provider and CredentialStore interfaces + implementations
 internal/clickup/   ClickUp API v2 client
 internal/cli/       Cobra commands
 internal/config/    Profile config and OS paths
+internal/tui/       tview/tcell terminal UI (3-pane layout)
 ```

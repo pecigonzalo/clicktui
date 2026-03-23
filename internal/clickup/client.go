@@ -43,8 +43,10 @@ func New(provider auth.Provider) *Client {
 // SetBaseURL overrides the API base URL.  Intended for tests only.
 func (c *Client) SetBaseURL(u string) { c.baseURL = u }
 
-// do executes an authenticated GET request and JSON-decodes the response body
+// do executes an authenticated request and JSON-decodes the response body
 // into out.  It returns an *APIError for non-2xx responses.
+//
+//nolint:unparam // method is always GET in the read-only MVP; mutation endpoints will use other verbs.
 func (c *Client) do(ctx context.Context, method, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
