@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/pecigonzalo/clicktui/internal/config"
 )
@@ -57,10 +58,10 @@ func TestGetProfile_NotFound(t *testing.T) {
 
 func TestSaveAndLoad_RoundTrip(t *testing.T) {
 	// Write a config directly to a temp file and read it back to verify the
-	// JSON serialisation round-trips correctly without touching the real OS
+	// YAML serialisation round-trips correctly without touching the real OS
 	// config directory.
 	dir := t.TempDir()
-	cfgFile := filepath.Join(dir, "config.json")
+	cfgFile := filepath.Join(dir, "config.yaml")
 
 	cfg := config.New()
 	cfg.SetProfile(&config.Profile{
@@ -70,14 +71,14 @@ func TestSaveAndLoad_RoundTrip(t *testing.T) {
 	})
 	cfg.ActiveProfile = "default"
 
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := yaml.Marshal(cfg)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(cfgFile, data, 0o600))
 
 	var loaded config.Config
 	raw, err := os.ReadFile(cfgFile)
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal(raw, &loaded))
+	require.NoError(t, yaml.Unmarshal(raw, &loaded))
 
 	assert.Equal(t, "default", loaded.ActiveProfile)
 	p, err := loaded.Profile("default")
@@ -129,17 +130,90 @@ func TestSave_And_Load(t *testing.T) {
 	assert.Equal(t, config.AuthMethodPersonalToken, p.AuthMethod)
 }
 
-func TestLoad_InvalidJSON_ReturnsError(t *testing.T) {
+func TestLoad_InvalidYAML_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := configFileInDir(t, dir) // sets HOME / XDG_CONFIG_HOME for us
 
-	// Create parent directories and write a broken JSON file.
+	// Create parent directories and write a broken YAML file.
 	require.NoError(t, os.MkdirAll(filepath.Dir(cfgPath), 0o700))
-	require.NoError(t, os.WriteFile(cfgPath, []byte("not-json{{{"), 0o600))
+	require.NoError(t, os.WriteFile(cfgPath, []byte(":\t:\nbad:\n  - :\t["), 0o600))
 
 	_, err := config.Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse config")
+}
+
+func TestLoad_MigratesLegacyJSON(t *testing.T) {
+	dir := t.TempDir()
+	setConfigDir(t, dir)
+
+	// Write a legacy JSON config file.
+	cfgDir, err := config.ConfigDir()
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(cfgDir, 0o700))
+
+	legacyPath := filepath.Join(cfgDir, "config.json")
+	legacyCfg := config.New()
+	legacyCfg.SetProfile(&config.Profile{
+		Name:        "default",
+		AuthMethod:  config.AuthMethodPersonalToken,
+		WorkspaceID: "ws-legacy",
+	})
+	data, err := json.MarshalIndent(legacyCfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(legacyPath, data, 0o600))
+
+	// Load should migrate the JSON to YAML automatically.
+	loaded, err := config.Load()
+	require.NoError(t, err)
+	p, err := loaded.Profile("default")
+	require.NoError(t, err)
+	assert.Equal(t, "ws-legacy", p.WorkspaceID)
+
+	// The legacy JSON file should have been removed.
+	_, err = os.Stat(legacyPath)
+	assert.True(t, os.IsNotExist(err), "legacy config.json should be removed after migration")
+
+	// The new YAML file should exist.
+	yamlPath, err := config.ConfigFilePath()
+	require.NoError(t, err)
+	_, err = os.Stat(yamlPath)
+	assert.NoError(t, err, "config.yaml should exist after migration")
+}
+
+func TestLoad_NoMigrationWhenYAMLExists(t *testing.T) {
+	dir := t.TempDir()
+	setConfigDir(t, dir)
+
+	cfgDir, err := config.ConfigDir()
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(cfgDir, 0o700))
+
+	// Write both a legacy JSON and a current YAML config.
+	legacyPath := filepath.Join(cfgDir, "config.json")
+	require.NoError(t, os.WriteFile(legacyPath, []byte(`{"active_profile":"default","profiles":{"default":{"name":"default","auth_method":"personal_token","workspace_id":"ws-json"}}}`), 0o600))
+
+	yamlPath := filepath.Join(cfgDir, "config.yaml")
+	yamlCfg := config.New()
+	yamlCfg.SetProfile(&config.Profile{
+		Name:        "default",
+		AuthMethod:  config.AuthMethodPersonalToken,
+		WorkspaceID: "ws-yaml",
+	})
+	yamlData, err := yaml.Marshal(yamlCfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(yamlPath, yamlData, 0o600))
+
+	// Load should use the YAML file, not the JSON.
+	loaded, err := config.Load()
+	require.NoError(t, err)
+	p, err := loaded.Profile("default")
+	require.NoError(t, err)
+	assert.Equal(t, "ws-yaml", p.WorkspaceID, "should load from YAML, not legacy JSON")
+
+	// Legacy JSON should still be present (not touched when YAML exists).
+	_, err = os.Stat(legacyPath)
+	assert.NoError(t, err, "legacy config.json should remain untouched when config.yaml exists")
 }
 
 func TestDataDir_UsesXDGDataHome(t *testing.T) {
@@ -160,5 +234,5 @@ func TestConfigDir_And_ConfigFilePath(t *testing.T) {
 
 	path, err := config.ConfigFilePath()
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(dir, "config.json"), path)
+	assert.Equal(t, filepath.Join(dir, "config.yaml"), path)
 }

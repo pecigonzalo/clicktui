@@ -9,7 +9,7 @@ import (
 
 const (
 	appName    = "clicktui"
-	configFile = "config.json"
+	configFile = "config.yaml"
 )
 
 // ConfigDir returns the OS-appropriate application config directory.

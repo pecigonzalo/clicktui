@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // AuthMethod identifies the authentication mechanism used by a profile.
@@ -22,24 +25,24 @@ const (
 // Profile holds per-profile settings including auth method and workspace selection.
 type Profile struct {
 	// Name is the profile identifier.
-	Name string `json:"name"`
+	Name string `yaml:"name" json:"name"`
 	// AuthMethod identifies how this profile authenticates.
-	AuthMethod AuthMethod `json:"auth_method"`
+	AuthMethod AuthMethod `yaml:"auth_method" json:"auth_method"`
 	// WorkspaceID is an optional ClickUp workspace (team) ID to use by default.
-	WorkspaceID string `json:"workspace_id,omitempty"`
+	WorkspaceID string `yaml:"workspace_id,omitempty" json:"workspace_id,omitempty"`
 	// SpaceID is an optional ClickUp space ID to navigate to on launch.
-	SpaceID string `json:"space_id,omitempty"`
+	SpaceID string `yaml:"space_id,omitempty" json:"space_id,omitempty"`
 	// ListID is an optional ClickUp list ID to navigate to on launch.
 	// Requires WorkspaceID and SpaceID to also be set.
-	ListID string `json:"list_id,omitempty"`
+	ListID string `yaml:"list_id,omitempty" json:"list_id,omitempty"`
 }
 
 // Config is the top-level application configuration.
 type Config struct {
 	// ActiveProfile is the name of the currently selected profile.
-	ActiveProfile string `json:"active_profile"`
+	ActiveProfile string `yaml:"active_profile" json:"active_profile"`
 	// Profiles holds all configured profiles keyed by name.
-	Profiles map[string]*Profile `json:"profiles"`
+	Profiles map[string]*Profile `yaml:"profiles" json:"profiles"`
 }
 
 var (
@@ -79,8 +82,50 @@ func (c *Config) SetProfile(p *Profile) {
 	c.Profiles[p.Name] = p
 }
 
+// legacyConfigFile is the old JSON config filename used before the YAML migration.
+const legacyConfigFile = "config.json"
+
+// legacyConfigPath returns the path to the old JSON config file.
+func legacyConfigPath() (string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, legacyConfigFile), nil
+}
+
+// migrateFromJSON checks for a legacy config.json and migrates it to config.yaml.
+// If config.yaml already exists, no migration is performed.
+func migrateFromJSON(yamlPath string) (*Config, bool, error) {
+	legacyPath, err := legacyConfigPath()
+	if err != nil {
+		return nil, false, err
+	}
+
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		return nil, false, nil //nolint:nilerr // file doesn't exist, no migration needed
+	}
+
+	cfg := New()
+	if err := json.Unmarshal(data, cfg); err != nil {
+		return nil, false, fmt.Errorf("parse legacy config: %w", err)
+	}
+
+	// Write the migrated YAML config.
+	if err := saveToPath(cfg, yamlPath); err != nil {
+		return nil, false, fmt.Errorf("migrate config to yaml: %w", err)
+	}
+
+	// Remove the legacy JSON file after successful migration.
+	_ = os.Remove(legacyPath)
+
+	return cfg, true, nil
+}
+
 // Load reads the config file at ConfigFilePath, returning a new default Config
-// if the file does not yet exist.
+// if the file does not yet exist. If config.yaml is missing but a legacy
+// config.json exists, it is migrated automatically.
 func Load() (*Config, error) {
 	path, err := ConfigFilePath()
 	if err != nil {
@@ -89,6 +134,14 @@ func Load() (*Config, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		// Attempt migration from legacy JSON config.
+		cfg, migrated, migrateErr := migrateFromJSON(path)
+		if migrateErr != nil {
+			return nil, migrateErr
+		}
+		if migrated {
+			return cfg, nil
+		}
 		return New(), nil
 	}
 	if err != nil {
@@ -96,10 +149,30 @@ func Load() (*Config, error) {
 	}
 
 	cfg := New()
-	if err := json.Unmarshal(data, cfg); err != nil {
+	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	return cfg, nil
+}
+
+// saveToPath marshals cfg to YAML and writes it to the given path.
+func saveToPath(cfg *Config, path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	// Ensure the file ends with a single trailing newline.
+	out := strings.TrimRight(string(data), "\n") + "\n"
+
+	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
 }
 
 // Save persists cfg to ConfigFilePath, creating the directory if needed.
@@ -108,18 +181,5 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-
-	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write config: %w", err)
-	}
-	return nil
+	return saveToPath(cfg, path)
 }

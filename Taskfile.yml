@@ -84,3 +84,20 @@ tasks:
     desc: Run pre-commit hooks manually
     cmds:
       - lefthook run pre-commit
+
+  schema:
+    desc: Validate that config.schema.json is well-formed JSON Schema
+    cmds:
+      - python3 -c "import json; json.load(open('config.schema.json')); print('config.schema.json is valid JSON')"
+    sources:
+      - config.schema.json
+
+  release:snapshot:
+    desc: Build a snapshot release locally (no publish)
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  release:check:
+    desc: Validate the GoReleaser configuration
+    cmds:
+      - goreleaser check
