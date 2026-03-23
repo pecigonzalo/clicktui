@@ -101,20 +101,42 @@ func (td *TaskDetailPane) openStatusPicker() {
 func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOption) {
 	list := tview.NewList()
 	list.SetBorder(true).
-		SetTitle(" Update Status ").
+		SetTitle(" ● Update Status ").
 		SetBorderColor(ColorBorderFocused).
 		SetTitleColor(ColorTitleFocused)
-	list.ShowSecondaryText(false)
+	list.ShowSecondaryText(true)
+	list.SetMainTextStyle(tcell.StyleDefault.Foreground(ColorDetailValue))
+	list.SetSecondaryTextStyle(tcell.StyleDefault.Foreground(ColorTextMuted))
 
 	for _, s := range statuses {
 		// Capture loop variable for closure.
 		chosen := s.Name
-		list.AddItem(s.Name, "", 0, func() {
+
+		// Build a coloured dot prefix using any color hint from the API.
+		// Fall back to the generic badge colour when the API color is absent.
+		dotColor := statusDotColor(s.Color, s.Type)
+		dot := tagColor(dotColor) + "●[-]"
+		typeLabel := statusTypeLabel(s.Type)
+		main := dot + " " + tview.Escape(s.Name)
+
+		list.AddItem(main, typeLabel, 0, func() {
 			td.tuiApp.pages.RemovePage(pageStatusPicker)
 			td.tuiApp.tviewApp.SetFocus(td.tuiApp.taskDetail.TextView)
 			td.applyStatusUpdate(taskID, chosen)
 		})
 	}
+
+	// Explicit cancel row — gives a visible affordance beyond just Esc.
+	list.AddItem(
+		tagColor(ColorTextMuted)+"✕ Cancel[-]",
+		"press Esc or Enter to dismiss",
+		0,
+		func() {
+			td.tuiApp.pages.RemovePage(pageStatusPicker)
+			td.tuiApp.tviewApp.SetFocus(td.tuiApp.taskDetail.TextView)
+			td.tuiApp.footer.SetStatusReady("Status update cancelled")
+		},
+	)
 
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
@@ -129,8 +151,10 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 	// Hint in footer while modal is open.
 	td.tuiApp.footer.SetHelp("Enter:select", "Esc:cancel")
 
-	// Centre the modal: fixed width/height over the main content.
-	modal := centreModal(list, 44, len(statuses)+4)
+	// Height: status rows + cancel row + borders + secondary-text rows.
+	// Each list item takes 2 rows when secondary text is shown; cap at 30.
+	modalHeight := min(len(statuses)*2+1*2+4, 30)
+	modal := centreModal(list, 48, modalHeight)
 	td.tuiApp.pages.AddPage(pageStatusPicker, modal, true, true)
 	td.tuiApp.tviewApp.SetFocus(list)
 }
@@ -182,103 +206,147 @@ func (td *TaskDetailPane) applyStatusUpdate(taskID, status string) {
 	}()
 }
 
-// label returns a right-padded label for the detail pane field grid.
-func label(s string) string {
+// ── Rendering helpers ─────────────────────────────────────────────────────────
+
+// detailLabel returns a right-padded, coloured label for a field row.
+func detailLabel(s string) string {
 	const width = 10
 	if len(s) < width {
 		s += strings.Repeat(" ", width-len(s))
 	}
-	return s
+	return tagColor(ColorDetailLabel) + s + "[-]"
+}
+
+// sectionHeader returns a tview-formatted section divider line.
+// Format:  "── Title ──────────────"  (muted colour, consistent weight)
+func sectionHeader(title string) string {
+	left := "── "
+	right := " " + strings.Repeat("─", 28)
+	return tagColor(ColorTextMuted) + left + title + right + "[-]"
+}
+
+// statusBadge returns a styled inline badge for a status string.
+func statusBadge(status string) string {
+	return tagColor(ColorBadgeStatus) + "● " + tview.Escape(status) + "[-]"
+}
+
+// priorityBadge returns a styled inline badge for a priority string.
+func priorityBadge(priority string) string {
+	sym := prioritySymbol(priority)
+	c := priorityColor(priority)
+	return tagColor(c) + sym + " " + tview.Escape(priority) + "[-]"
+}
+
+// statusDotColor returns a tcell color for the status dot in the picker.
+// It tries to parse an API-provided hex color string; falls back to
+// ColorBadgeStatus when absent or unparseable.
+func statusDotColor(apiColor, statusType string) tcell.Color {
+	// ClickUp returns colors as "#rrggbb" strings.
+	if len(apiColor) == 7 && apiColor[0] == '#' {
+		var r, g, b uint8
+		if n, _ := fmt.Sscanf(apiColor, "#%02x%02x%02x", &r, &g, &b); n == 3 {
+			return tcell.NewRGBColor(int32(r), int32(g), int32(b))
+		}
+	}
+	// Fall back to type-based colouring so closed/done statuses look muted.
+	switch statusType {
+	case "closed", "done":
+		return ColorTextMuted
+	default:
+		return ColorBadgeStatus
+	}
+}
+
+// statusTypeLabel returns a short human-friendly label for a status type string.
+func statusTypeLabel(t string) string {
+	switch t {
+	case "open":
+		return "open"
+	case "custom":
+		return "in-progress"
+	case "closed", "done":
+		return "closed"
+	default:
+		return t
+	}
 }
 
 func (td *TaskDetailPane) render(d *app.TaskDetail) {
 	var b strings.Builder
 
-	// ── Title block ─────────────────────────────────────────────────────────
+	// ── Title block ──────────────────────────────────────────────────────────
+	// Task name in bold white, then ID + custom ID on a muted line.
 	fmt.Fprintf(&b, "[white::b]%s[-:-:-]\n", tview.Escape(d.Name))
-	fmt.Fprintf(&b, "%s%s[-]", tagColor(ColorTextSubtle), tview.Escape(d.ID))
+
+	idLine := tagColor(ColorTextSubtle) + tview.Escape(d.ID) + "[-]"
 	if d.CustomID != "" {
-		fmt.Fprintf(&b, "  %s%s[-]", tagColor(ColorTextSubtle), tview.Escape(d.CustomID))
+		idLine += "  " + tagColor(ColorTextMuted) + tview.Escape(d.CustomID) + "[-]"
 	}
-	b.WriteString("\n\n")
+	b.WriteString(idLine + "\n\n")
 
-	// ── Core fields ──────────────────────────────────────────────────────────
-	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-		tagColor(ColorDetailLabel), label("Status"),
-		tagColor(ColorBadgeStatus), tview.Escape(d.Status))
-	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-		tagColor(ColorDetailLabel), label("Priority"),
-		tagColor(priorityColor(d.Priority)), tview.Escape(d.Priority))
+	// ── Status & Priority badges ─────────────────────────────────────────────
+	// Rendered side by side on one line for quick at-a-glance scanning.
+	b.WriteString(detailLabel("Status") + "  " + statusBadge(d.Status) + "\n")
+	b.WriteString(detailLabel("Priority") + "  " + priorityBadge(d.Priority) + "\n")
 
-	if len(d.Assignees) > 0 {
-		fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-			tagColor(ColorDetailLabel), label("Assignees"),
-			tagColor(ColorDetailValue), tview.Escape(strings.Join(d.Assignees, ", ")))
-	}
-	if len(d.Tags) > 0 {
-		fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-			tagColor(ColorDetailLabel), label("Tags"),
-			tagColor(ColorDetailValue), tview.Escape(strings.Join(d.Tags, ", ")))
+	// ── People & Tags ────────────────────────────────────────────────────────
+	if len(d.Assignees) > 0 || len(d.Tags) > 0 {
+		b.WriteString("\n")
+		if len(d.Assignees) > 0 {
+			fmt.Fprintf(&b, "%s  %s%s[-]\n",
+				detailLabel("Assignees"),
+				tagColor(ColorDetailValue),
+				tview.Escape(strings.Join(d.Assignees, ", ")))
+		}
+		if len(d.Tags) > 0 {
+			fmt.Fprintf(&b, "%s  %s%s[-]\n",
+				detailLabel("Tags"),
+				tagColor(ColorDetailValue),
+				tview.Escape(strings.Join(d.Tags, ", ")))
+		}
 	}
 
 	// ── Dates ────────────────────────────────────────────────────────────────
 	hasDates := d.DueDate != "" || d.StartDate != "" || d.DateCreated != "" || d.DateUpdated != ""
 	if hasDates {
-		b.WriteString("\n")
+		b.WriteString("\n" + sectionHeader("Dates") + "\n")
 		if d.DueDate != "" {
-			fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-				tagColor(ColorDetailLabel), label("Due"),
-				tagColor(ColorDetailValue), d.DueDate)
+			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Due"), tagColor(ColorDetailValue), d.DueDate)
 		}
 		if d.StartDate != "" {
-			fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-				tagColor(ColorDetailLabel), label("Start"),
-				tagColor(ColorDetailValue), d.StartDate)
+			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Start"), tagColor(ColorDetailValue), d.StartDate)
 		}
 		if d.DateCreated != "" {
-			fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-				tagColor(ColorDetailLabel), label("Created"),
-				tagColor(ColorDetailValue), d.DateCreated)
+			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Created"), tagColor(ColorDetailValue), d.DateCreated)
 		}
 		if d.DateUpdated != "" {
-			fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-				tagColor(ColorDetailLabel), label("Updated"),
-				tagColor(ColorDetailValue), d.DateUpdated)
+			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Updated"), tagColor(ColorDetailValue), d.DateUpdated)
 		}
 	}
 
 	// ── Location ─────────────────────────────────────────────────────────────
-	b.WriteString("\n")
-	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-		tagColor(ColorDetailLabel), label("Space"),
-		tagColor(ColorDetailValue), tview.Escape(d.Space))
-	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-		tagColor(ColorDetailLabel), label("Folder"),
-		tagColor(ColorDetailValue), tview.Escape(d.Folder))
-	fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-		tagColor(ColorDetailLabel), label("List"),
-		tagColor(ColorDetailValue), tview.Escape(d.List))
+	b.WriteString("\n" + sectionHeader("Location") + "\n")
+	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Space"), tagColor(ColorDetailValue), tview.Escape(d.Space))
+	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Folder"), tagColor(ColorDetailValue), tview.Escape(d.Folder))
+	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("List"), tagColor(ColorDetailValue), tview.Escape(d.List))
 	if d.Parent != "" {
-		fmt.Fprintf(&b, "%s%s[-] %s%s[-]\n",
-			tagColor(ColorDetailLabel), label("Parent"),
-			tagColor(ColorDetailValue), d.Parent)
+		fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Parent"), tagColor(ColorDetailValue), d.Parent)
 	}
 
 	// ── URL ──────────────────────────────────────────────────────────────────
 	if d.URL != "" {
-		fmt.Fprintf(&b, "\n%s%s[-]\n", tagColor(ColorTextSubtle), d.URL)
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("URL"), tagColor(ColorTextSubtle), d.URL)
 	}
 
 	// ── Description ──────────────────────────────────────────────────────────
 	if d.Description != "" {
-		fmt.Fprintf(&b, "\n%s── Description ──[-]\n%s%s[-]\n",
-			tagColor(ColorDetailLabel),
-			tagColor(ColorDetailValue),
-			tview.Escape(d.Description))
+		b.WriteString("\n" + sectionHeader("Description") + "\n")
+		fmt.Fprintf(&b, "%s%s[-]\n", tagColor(ColorDetailValue), tview.Escape(d.Description))
 	}
 
-	// ── Footer hint ──────────────────────────────────────────────────────────
-	fmt.Fprintf(&b, "\n%s[s] update status[-]", tagColor(ColorTextSubtle))
+	// ── Action hint ──────────────────────────────────────────────────────────
+	b.WriteString("\n" + tagColor(ColorTextSubtle) + "[s] update status[-]")
 
 	td.SetText(b.String())
 	td.ScrollToBeginning()
