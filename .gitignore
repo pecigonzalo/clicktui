@@ -31,3 +31,10 @@ vendor/
 
 # OpenCode session data
 .opencode/sessions/
+
+# Secrets and certificates
+.env*
+*.key
+*.pem
+*.p12
+*.pfx
