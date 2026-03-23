@@ -14,13 +14,15 @@ import (
 // TaskListPane displays tasks for a selected list in a table.
 type TaskListPane struct {
 	*tview.Table
-	tuiApp    *App
-	tasks     []app.TaskSummary
-	currentID string
-	listName  string
-	page      int
-	isLoading bool
-	styler    *PaneStyler // set by app.go after construction
+	tuiApp      *App
+	tasks       []app.TaskSummary // currently displayed tasks (may be filtered)
+	allTasks    []app.TaskSummary // unfiltered full task set for the current list
+	activeQuery *app.TaskQuery    // non-nil when a filter is active
+	currentID   string
+	listName    string
+	page        int
+	isLoading   bool
+	styler      *PaneStyler // set by app.go after construction
 }
 
 // NewTaskListPane creates an empty task list table.
@@ -76,11 +78,11 @@ func (tlp *TaskListPane) fetchPage() {
 				return
 			}
 			if tlp.page == 0 {
-				tlp.tasks = tasks
+				tlp.allTasks = tasks
 			} else {
-				tlp.tasks = append(tlp.tasks, tasks...)
+				tlp.allTasks = append(tlp.allTasks, tasks...)
 			}
-			tlp.render()
+			tlp.reapplyFilter()
 			if len(tasks) == 0 && tlp.page == 0 {
 				tlp.tuiApp.footer.SetStatusReady(fmt.Sprintf("No tasks in %s", tlp.listName))
 			} else {
@@ -223,6 +225,24 @@ func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 // refreshCurrentTask updates the status column for a task in the list without
 // a full reload.  Must be called from the UI goroutine.
 func (tlp *TaskListPane) refreshCurrentTask(taskID, newStatus string) {
+	// Update allTasks (the canonical unfiltered set) so restoring from filter
+	// picks up the new status.
+	for i, t := range tlp.allTasks {
+		if t.ID == taskID {
+			tlp.allTasks[i].Status = newStatus
+			break
+		}
+	}
+
+	// If a filter is active, reapply it — the task may no longer match the
+	// filter criteria after the status change.
+	if tlp.activeQuery != nil {
+		tlp.reapplyFilter()
+		return
+	}
+
+	// No filter active: update the displayed tasks and the visible table cell
+	// in place for a snappy update without a full re-render.
 	for i, t := range tlp.tasks {
 		if t.ID == taskID {
 			tlp.tasks[i].Status = newStatus
@@ -235,4 +255,49 @@ func (tlp *TaskListPane) refreshCurrentTask(taskID, newStatus string) {
 			return
 		}
 	}
+}
+
+// ApplyFilter replaces the displayed tasks with the given filtered subset and
+// stores the query so it can be reapplied after pagination or status changes.
+// Pass nil/empty query to show all tasks (equivalent to ClearFilter). Must be
+// called from the UI goroutine.
+func (tlp *TaskListPane) ApplyFilter(filtered []app.TaskSummary, query app.TaskQuery) {
+	if query.Empty() {
+		tlp.activeQuery = nil
+		tlp.tasks = tlp.allTasks
+	} else {
+		tlp.activeQuery = &query
+		if filtered == nil {
+			tlp.tasks = nil
+		} else {
+			tlp.tasks = filtered
+		}
+	}
+	tlp.render()
+}
+
+// ClearFilter restores the full unfiltered task list. Must be called from the
+// UI goroutine.
+func (tlp *TaskListPane) ClearFilter() {
+	tlp.activeQuery = nil
+	tlp.tasks = tlp.allTasks
+	tlp.render()
+}
+
+// reapplyFilter applies the active filter query to allTasks and re-renders.
+// When no filter is active, it shows all tasks. Must be called from the UI
+// goroutine.
+func (tlp *TaskListPane) reapplyFilter() {
+	if tlp.activeQuery == nil {
+		tlp.tasks = tlp.allTasks
+	} else {
+		filtered := app.FilterTasks(tlp.allTasks, *tlp.activeQuery)
+		if filtered == nil {
+			// Query produced no matches — show empty filtered set.
+			tlp.tasks = nil
+		} else {
+			tlp.tasks = filtered
+		}
+	}
+	tlp.render()
 }

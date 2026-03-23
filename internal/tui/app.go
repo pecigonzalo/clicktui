@@ -62,6 +62,16 @@ type App struct {
 	focusOrder []tview.Primitive
 	focusIdx   int
 
+	// Filter overlays — one per filterable pane (tree, task list).
+	// The detail pane does not support filtering.
+	treeFilter     *FilterOverlay
+	taskListFilter *FilterOverlay
+	// treeFilterRow and taskListFilterRow are Flex containers that hold the
+	// pane + its filter input. They replace the raw pane in the column layout
+	// so the filter bar appears at the bottom of the pane.
+	treeFilterRow     *tview.Flex
+	taskListFilterRow *tview.Flex
+
 	launch       LaunchOptions
 	treeVisible  bool
 	treeMinWidth int // proportion when tree is visible
@@ -105,12 +115,82 @@ func (a *App) buildLayout() {
 	a.paneStylers[paneTaskList].SetInactive()
 	a.paneStylers[paneTaskDetail].SetInactive()
 
+	// Create filter overlays for the tree and task list panes.
+	a.treeFilter = NewFilterOverlay(
+		func(text string) {
+			a.paneStylers[paneTree].SetFilterText(text)
+			// Apply hierarchy filter: filter the cached tree nodes and rebuild.
+			if text == "" {
+				a.tree.ClearFilter()
+			} else {
+				filtered := app.FilterHierarchy(a.tree.cachedNodes, text)
+				a.tree.ApplyFilter(filtered)
+			}
+		},
+		func() {
+			a.paneStylers[paneTree].SetFilterText("")
+			// Hide the filter input row.
+			a.treeFilterRow.ResizeItem(a.treeFilter.InputField(), 0, 0)
+			a.restoreDefaultHelp()
+			// Restore unfiltered hierarchy.
+			a.tree.ClearFilter()
+		},
+		func() {
+			// Return focus and restore help when filter is applied (Enter).
+			a.tviewApp.SetFocus(a.tree)
+			if !a.treeFilter.IsActive() {
+				a.treeFilterRow.ResizeItem(a.treeFilter.InputField(), 0, 0)
+			}
+			a.restoreDefaultHelp()
+		},
+	)
+
+	a.taskListFilter = NewFilterOverlay(
+		func(text string) {
+			a.paneStylers[paneTaskList].SetFilterText(text)
+			// Apply task filter: parse query and filter the full task set.
+			if text == "" {
+				a.taskList.ClearFilter()
+			} else {
+				query := app.ParseTaskQuery(text)
+				filtered := app.FilterTasks(a.taskList.allTasks, query)
+				a.taskList.ApplyFilter(filtered, query)
+			}
+		},
+		func() {
+			a.paneStylers[paneTaskList].SetFilterText("")
+			// Hide the filter input row.
+			a.taskListFilterRow.ResizeItem(a.taskListFilter.InputField(), 0, 0)
+			a.restoreDefaultHelp()
+			// Restore unfiltered task list.
+			a.taskList.ClearFilter()
+		},
+		func() {
+			// Return focus and restore help when filter is applied (Enter).
+			a.tviewApp.SetFocus(a.taskList)
+			if !a.taskListFilter.IsActive() {
+				a.taskListFilterRow.ResizeItem(a.taskListFilter.InputField(), 0, 0)
+			}
+			a.restoreDefaultHelp()
+		},
+	)
+
+	// Wrap each filterable pane in a vertical Flex: pane (grows) + filter bar
+	// (1 row, hidden by default). The filter input height is 1 when visible.
+	a.treeFilterRow = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.tree, 0, 1, true).
+		AddItem(a.treeFilter.InputField(), 0, 0, false)
+
+	a.taskListFilterRow = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.taskList, 0, 1, true).
+		AddItem(a.taskListFilter.InputField(), 0, 0, false)
+
 	// Layout: hierarchy is narrower than task list; detail gets a good share.
 	// Proportions 3:5:4 give the hierarchy enough room for deep names while the
 	// task list has the most space for scanning rows.
 	a.panes = tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(a.tree, 0, 3, true).
-		AddItem(a.taskList, 0, 5, false).
+		AddItem(a.treeFilterRow, 0, 3, true).
+		AddItem(a.taskListFilterRow, 0, 5, false).
 		AddItem(a.taskDetail, 0, 4, false)
 
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -130,6 +210,7 @@ func (a *App) buildLayout() {
 		"Tab:next pane",
 		"Shift+Tab:prev pane",
 		"Enter:select",
+		"/:filter",
 		"[:toggle tree",
 		"s:update status",
 		"y:copy id",
@@ -141,6 +222,13 @@ func (a *App) buildLayout() {
 }
 
 func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
+	// When a filter overlay is in edit mode, only allow Esc and Enter
+	// (handled by the overlay itself). Block all other global keybindings
+	// so they don't propagate.
+	if a.isFilterEditing() {
+		return event
+	}
+
 	switch event.Key() {
 	case tcell.KeyTab:
 		a.cycleFocus(1)
@@ -150,6 +238,9 @@ func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	case tcell.KeyRune:
 		switch event.Rune() {
+		case '/':
+			a.activateFilter()
+			return nil
 		case 'q':
 			a.tviewApp.Stop()
 			return nil
@@ -230,14 +321,65 @@ func (a *App) setTreeVisible(visible bool) {
 	// Rebuild the panes flex — tview does not support hiding individual items.
 	a.panes.Clear()
 	if visible {
-		a.panes.AddItem(a.tree, 0, a.treeMinWidth, false)
+		a.panes.AddItem(a.treeFilterRow, 0, a.treeMinWidth, false)
 	}
-	a.panes.AddItem(a.taskList, 0, 5, !visible)
+	a.panes.AddItem(a.taskListFilterRow, 0, 5, !visible)
 	a.panes.AddItem(a.taskDetail, 0, 4, false)
 
 	if !visible && paneID(a.focusIdx) == paneTree {
 		a.setFocusPane(paneTaskList)
 	}
+}
+
+// ── Filter overlay management ────────────────────────────────────────────────
+
+// isFilterEditing reports whether any filter overlay is currently in editing
+// mode (accepting keystrokes).
+func (a *App) isFilterEditing() bool {
+	return a.treeFilter.IsEditing() || a.taskListFilter.IsEditing()
+}
+
+// activateFilter shows the filter overlay for the currently focused pane.
+// Only the tree and task list panes support filtering.
+func (a *App) activateFilter() {
+	focusedPane := paneID(a.focusIdx)
+
+	var overlay *FilterOverlay
+	var filterRow *tview.Flex
+
+	switch focusedPane {
+	case paneTree:
+		overlay = a.treeFilter
+		filterRow = a.treeFilterRow
+	case paneTaskList:
+		overlay = a.taskListFilter
+		filterRow = a.taskListFilterRow
+	default:
+		// Detail pane — no filtering.
+		return
+	}
+
+	// Show the filter input row (1-line height).
+	filterRow.ResizeItem(overlay.InputField(), 1, 0)
+	overlay.Show()
+	a.tviewApp.SetFocus(overlay.InputField())
+
+	// Update footer to show filter-mode keybindings.
+	a.footer.SetHelp("Enter:apply filter", "Esc:clear filter")
+}
+
+// restoreDefaultHelp resets the footer help to the standard keybinding set.
+func (a *App) restoreDefaultHelp() {
+	a.footer.SetHelp(
+		"Tab:next pane",
+		"Shift+Tab:prev pane",
+		"Enter:select",
+		"/:filter",
+		"[:toggle tree",
+		"s:update status",
+		"y:copy id",
+		"q:quit",
+	)
 }
 
 // Run starts the TUI event loop. It blocks until the application exits.

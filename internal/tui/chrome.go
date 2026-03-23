@@ -18,9 +18,10 @@ import (
 // PaneStyler holds references needed to update a pane's chrome when focus
 // changes.
 type PaneStyler struct {
-	box     *tview.Box
-	title   string
-	focused bool
+	box        *tview.Box
+	title      string
+	focused    bool
+	filterText string // non-empty when a filter is active on this pane
 }
 
 // newPaneStyler creates a PaneStyler for the given box and title text.
@@ -34,7 +35,7 @@ func (ps *PaneStyler) SetFocused() {
 	ps.focused = true
 	ps.box.SetBorderColor(ColorBorderFocused).
 		SetTitleColor(ColorTitleFocused).
-		SetTitle(" " + ps.title + " ")
+		SetTitle(" " + ps.fullTitle() + " ")
 }
 
 // SetInactive applies inactive-pane chrome (dim border + muted title).
@@ -42,7 +43,22 @@ func (ps *PaneStyler) SetInactive() {
 	ps.focused = false
 	ps.box.SetBorderColor(ColorBorderInactive).
 		SetTitleColor(ColorTitleInactive).
-		SetTitle(" " + ps.title + " ")
+		SetTitle(" " + ps.fullTitle() + " ")
+}
+
+// SetFilterText updates the filter indicator shown in the pane title.
+// Pass "" to clear the indicator.
+func (ps *PaneStyler) SetFilterText(text string) {
+	ps.filterText = text
+	ps.reapply()
+}
+
+// fullTitle returns the base title with an optional filter indicator appended.
+func (ps *PaneStyler) fullTitle() string {
+	if ps.filterText == "" {
+		return ps.title
+	}
+	return ps.title + "  " + tagColor(ColorFilterAccent) + "🔍 " + tview.Escape(ps.filterText) + "[-]"
 }
 
 // reapply re-renders the current focus state with the current title.

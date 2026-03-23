@@ -83,6 +83,14 @@ var (
 	ColorDetailValue = tcell.ColorWhite
 )
 
+// Filter
+var (
+	// ColorFilterAccent is the foreground for filter indicators in pane titles.
+	ColorFilterAccent = tcell.ColorMediumOrchid
+	// ColorFilterPrompt is the foreground for the filter input prompt.
+	ColorFilterPrompt = tcell.ColorMediumOrchid
+)
+
 // Footer
 var (
 	// ColorFooterStatus is the foreground for the left status segment.

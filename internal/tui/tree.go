@@ -14,10 +14,11 @@ import (
 // TreePane renders the workspace/space/folder/list hierarchy as a tree.
 type TreePane struct {
 	*tview.TreeView
-	app      *App
-	root     *tview.TreeNode
-	styler   *PaneStyler
-	selected string // name of the currently selected list, empty if none
+	app         *App
+	root        *tview.TreeNode
+	styler      *PaneStyler
+	selected    string               // name of the currently selected list, empty if none
+	cachedNodes []*app.HierarchyNode // unfiltered top-level nodes for filter restore
 }
 
 // NewTreePane creates an empty hierarchy tree.
@@ -48,6 +49,7 @@ func (tp *TreePane) SetWorkspaces(ctx context.Context, nodes []*app.HierarchyNod
 		child.AddChild(tview.NewTreeNode("  loading…").SetColor(ColorTextSubtle).SetSelectable(false))
 		tp.root.AddChild(child)
 	}
+	tp.snapshotNodes()
 }
 
 // SetSpaces populates the tree with space nodes for a single workspace,
@@ -70,6 +72,7 @@ func (tp *TreePane) SetSpaces(_ context.Context, workspaceID string, nodes []*ap
 	}
 	wsTreeNode.SetExpanded(true)
 	tp.root.AddChild(wsTreeNode)
+	tp.snapshotNodes()
 }
 
 // SetSpacesAndExpand populates the tree for a workspace, then expands the
@@ -122,6 +125,7 @@ func (tp *TreePane) SetSpacesAndExpand(
 	}
 	wsTreeNode.SetExpanded(true)
 	tp.root.AddChild(wsTreeNode)
+	tp.snapshotNodes()
 }
 
 // refreshTitle updates the pane title to show the selected list context.
@@ -191,6 +195,7 @@ func (tp *TreePane) expandWorkspace(node *tview.TreeNode, ref *app.HierarchyNode
 			}
 			node.SetExpanded(true)
 			tp.app.footer.SetStatusReady("Ready")
+			tp.snapshotNodes()
 		})
 	}()
 }
@@ -229,6 +234,7 @@ func (tp *TreePane) expandSpace(node *tview.TreeNode, ref *app.HierarchyNode) {
 			}
 			node.SetExpanded(true)
 			tp.app.footer.SetStatusReady("Ready")
+			tp.snapshotNodes()
 		})
 	}()
 }
@@ -251,6 +257,79 @@ func (tp *TreePane) SelectedNodeID() string {
 		return ""
 	}
 	return ref.ID
+}
+
+// snapshotNodes captures the current tree's HierarchyNode references so the
+// unfiltered state can be restored later.
+func (tp *TreePane) snapshotNodes() {
+	tp.cachedNodes = tp.collectRootNodes()
+}
+
+// collectRootNodes walks the root's direct children and returns their
+// HierarchyNode references.
+func (tp *TreePane) collectRootNodes() []*app.HierarchyNode {
+	var nodes []*app.HierarchyNode
+	for _, child := range tp.root.GetChildren() {
+		ref, ok := child.GetReference().(*app.HierarchyNode)
+		if ok {
+			nodes = append(nodes, ref)
+		}
+	}
+	return nodes
+}
+
+// ApplyFilter rebuilds the visual tree using the given filtered hierarchy
+// nodes. Pass nil to show all nodes (equivalent to ClearFilter). Must be
+// called from the UI goroutine.
+func (tp *TreePane) ApplyFilter(filtered []*app.HierarchyNode) {
+	if filtered == nil {
+		tp.ClearFilter()
+		return
+	}
+	tp.rebuildFromNodes(filtered)
+}
+
+// ClearFilter restores the full unfiltered tree. Must be called from the UI
+// goroutine.
+func (tp *TreePane) ClearFilter() {
+	if tp.cachedNodes == nil {
+		return
+	}
+	tp.rebuildFromNodes(tp.cachedNodes)
+}
+
+// rebuildFromNodes replaces all visual tree content under root with tree nodes
+// constructed from the given hierarchy nodes. All nodes are expanded so the
+// filter results are fully visible.
+func (tp *TreePane) rebuildFromNodes(nodes []*app.HierarchyNode) {
+	tp.root.ClearChildren()
+	for _, n := range nodes {
+		child := tp.buildSubtree(n)
+		tp.root.AddChild(child)
+	}
+}
+
+// buildSubtree recursively creates tview.TreeNode structures from a
+// HierarchyNode and all its children. All nodes are expanded so filter
+// results are immediately visible.
+func (tp *TreePane) buildSubtree(n *app.HierarchyNode) *tview.TreeNode {
+	node := tp.makeTreeNode(n)
+	for _, c := range n.Children {
+		node.AddChild(tp.buildSubtree(c))
+	}
+	// If this node has been loaded from the API but the filter produced
+	// children, expand it so results are visible.
+	if len(n.Children) > 0 {
+		node.SetExpanded(true)
+	}
+	// If the node was loaded but has no children yet (leaf or not-yet-loaded
+	// in the filtered copy), add a loading placeholder when the original
+	// node would have one (non-leaf, non-loaded).
+	if !n.Loaded && len(n.Children) == 0 && n.Kind != app.NodeList {
+		node.AddChild(tview.NewTreeNode("  loading…").
+			SetColor(ColorTextSubtle).SetSelectable(false))
+	}
+	return node
 }
 
 // makeTreeNode creates a styled tree node for a hierarchy entry.
