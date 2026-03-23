@@ -64,9 +64,6 @@ func (tlp *TaskListPane) fetchPage() {
 	}
 	tlp.isLoading = true
 	tlp.tuiApp.setStatusLoading("Loading tasks for %s (page %d)…", tlp.listName, tlp.page)
-	if tlp.page == 0 {
-		tlp.showLoading()
-	}
 
 	ctx := context.Background()
 	go func() {
@@ -189,13 +186,6 @@ func (tlp *TaskListPane) render() {
 func (tlp *TaskListPane) showEmpty(msg string) {
 	tlp.Clear()
 	tlp.SetCell(0, 0, tview.NewTableCell(emptyText(msg)).
-		SetSelectable(false).
-		SetExpansion(1))
-}
-
-func (tlp *TaskListPane) showLoading() {
-	tlp.Clear()
-	tlp.SetCell(0, 0, tview.NewTableCell(loadingText("Loading tasks…")).
 		SetSelectable(false).
 		SetExpansion(1))
 }

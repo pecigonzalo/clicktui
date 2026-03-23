@@ -8,19 +8,6 @@ import (
 
 // ── state placeholder helpers ─────────────────────────────────────────────────
 
-func TestLoadingText(t *testing.T) {
-	got := loadingText("Loading tasks…")
-	if !strings.Contains(got, "Loading tasks") {
-		t.Errorf("loadingText = %q, expected to contain the message", got)
-	}
-	if !strings.Contains(got, "[yellow]") {
-		t.Errorf("loadingText = %q, expected yellow colour tag", got)
-	}
-	if !strings.Contains(got, "⟳") {
-		t.Errorf("loadingText = %q, expected spinner symbol ⟳", got)
-	}
-}
-
 func TestErrorText(t *testing.T) {
 	got := errorText("something went wrong")
 	if !strings.Contains(got, "something went wrong") {

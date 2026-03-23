@@ -152,11 +152,6 @@ func (f *Footer) refresh() {
 
 // ── Inline state helpers ──────────────────────────────────────────────────────
 
-// loadingText returns a tview-formatted "loading" placeholder.
-func loadingText(msg string) string {
-	return "[yellow]⟳ " + tview.Escape(msg) + "[-]"
-}
-
 // errorText returns a tview-formatted error placeholder.
 func errorText(msg string) string {
 	return "[red]✗ " + tview.Escape(msg) + "[-]"

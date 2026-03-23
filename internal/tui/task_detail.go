@@ -56,7 +56,6 @@ func (td *TaskDetailPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 
 // LoadDetail fetches and renders a task's full details.
 func (td *TaskDetailPane) LoadDetail(taskID string) {
-	td.SetText(loadingText("Loading task details…"))
 	td.tuiApp.setStatusLoading("Loading task %s…", taskID)
 
 	ctx := context.Background()

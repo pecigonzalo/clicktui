@@ -45,8 +45,6 @@ func (tp *TreePane) SetWorkspaces(ctx context.Context, nodes []*app.HierarchyNod
 	tp.root.ClearChildren()
 	for _, n := range nodes {
 		child := tp.makeTreeNode(n)
-		// Add a placeholder so the node is expandable.
-		child.AddChild(tview.NewTreeNode("  loading…").SetColor(ColorTextSubtle).SetSelectable(false))
 		tp.root.AddChild(child)
 	}
 	tp.snapshotNodes()
@@ -67,7 +65,6 @@ func (tp *TreePane) SetSpaces(_ context.Context, workspaceID string, nodes []*ap
 	wsTreeNode := tp.makeTreeNode(wsNode)
 	for _, n := range nodes {
 		child := tp.makeTreeNode(n)
-		child.AddChild(tview.NewTreeNode("  loading…").SetColor(ColorTextSubtle).SetSelectable(false))
 		wsTreeNode.AddChild(child)
 	}
 	wsTreeNode.SetExpanded(true)
@@ -116,10 +113,6 @@ func (tp *TreePane) SetSpacesAndExpand(
 			// Update the tree title to show the space name.
 			tp.selected = s.Name
 			tp.refreshTitle()
-		} else {
-			spaceTreeNode.AddChild(
-				tview.NewTreeNode("  loading…").SetColor(ColorTextSubtle).SetSelectable(false),
-			)
 		}
 		wsTreeNode.AddChild(spaceTreeNode)
 	}
@@ -172,7 +165,6 @@ func (tp *TreePane) expandWorkspace(node *tview.TreeNode, ref *app.HierarchyNode
 	}
 
 	node.ClearChildren()
-	node.AddChild(tview.NewTreeNode("  loading spaces…").SetColor(ColorTextSubtle).SetSelectable(false))
 	tp.app.setStatusLoading("Loading spaces…")
 
 	ctx := context.Background()
@@ -190,7 +182,6 @@ func (tp *TreePane) expandWorkspace(node *tview.TreeNode, ref *app.HierarchyNode
 			ref.Loaded = true
 			for _, c := range children {
 				child := tp.makeTreeNode(c)
-				child.AddChild(tview.NewTreeNode("  loading…").SetColor(ColorTextSubtle).SetSelectable(false))
 				node.AddChild(child)
 			}
 			node.SetExpanded(true)
@@ -207,7 +198,6 @@ func (tp *TreePane) expandSpace(node *tview.TreeNode, ref *app.HierarchyNode) {
 	}
 
 	node.ClearChildren()
-	node.AddChild(tview.NewTreeNode("  loading contents…").SetColor(ColorTextSubtle).SetSelectable(false))
 	tp.app.setStatusLoading("Loading folders and lists…")
 
 	ctx := context.Background()
@@ -321,13 +311,6 @@ func (tp *TreePane) buildSubtree(n *app.HierarchyNode) *tview.TreeNode {
 	// children, expand it so results are visible.
 	if len(n.Children) > 0 {
 		node.SetExpanded(true)
-	}
-	// If the node was loaded but has no children yet (leaf or not-yet-loaded
-	// in the filtered copy), add a loading placeholder when the original
-	// node would have one (non-leaf, non-loaded).
-	if !n.Loaded && len(n.Children) == 0 && n.Kind != app.NodeList {
-		node.AddChild(tview.NewTreeNode("  loading…").
-			SetColor(ColorTextSubtle).SetSelectable(false))
 	}
 	return node
 }
