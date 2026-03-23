@@ -31,9 +31,10 @@ const (
 
 // LaunchOptions configures the initial navigation state of the TUI.
 // When both WorkspaceID and SpaceID are set, the TUI auto-navigates to the
-// space, expands its contents, and collapses the tree pane. When only
-// WorkspaceID is set, the TUI loads spaces for that workspace. When neither is
-// set, the TUI loads all workspaces (default behaviour).
+// space, expands its contents in the tree, and focuses the tree so the user
+// can immediately select a folder or list. When only WorkspaceID is set, the
+// TUI loads spaces for that workspace. When neither is set, the TUI loads all
+// workspaces (default behaviour).
 type LaunchOptions struct {
 	WorkspaceID string
 	SpaceID     string
@@ -284,7 +285,8 @@ func (a *App) doAutoNavToWorkspace(ctx context.Context, workspaceID string) {
 }
 
 // doAutoNavToSpace loads spaces and a specific space's contents, then updates
-// the tree and collapses it. It blocks until all API calls and UI updates are
+// the tree with the space expanded and sets focus to the tree pane so the user
+// can select a folder or list. It blocks until all API calls and UI updates are
 // complete.
 func (a *App) doAutoNavToSpace(ctx context.Context, workspaceID, spaceID string) {
 	// Load spaces to find the target space name, then load its contents.
@@ -308,8 +310,7 @@ func (a *App) doAutoNavToSpace(ctx context.Context, workspaceID, spaceID string)
 
 	a.tviewApp.QueueUpdateDraw(func() {
 		a.tree.SetSpacesAndExpand(ctx, workspaceID, spaces, spaceID, contents)
-		a.setTreeVisible(false)
-		a.setFocusPane(paneTaskList)
+		a.setFocusPane(paneTree)
 		a.footer.SetStatusReady("Ready")
 	})
 }
