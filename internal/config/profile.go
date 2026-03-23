@@ -189,6 +189,26 @@ func saveToPath(cfg *Config, path string) error {
 	return nil
 }
 
+// WriteSchema writes the embedded config.schema.json to the config directory.
+// It creates the directory if needed and returns the full path it wrote to.
+func WriteSchema() (string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create config dir: %w", err)
+	}
+
+	schemaPath := filepath.Join(dir, schemaFile)
+	if err := os.WriteFile(schemaPath, schemaJSON, 0o600); err != nil {
+		return "", fmt.Errorf("write config schema: %w", err)
+	}
+
+	return schemaPath, nil
+}
+
 // Save persists cfg to ConfigFilePath, creating the directory if needed.
 // It also writes the embedded config.schema.json alongside config.yaml so that
 // editors with the YAML Language Server extension can provide inline validation.
@@ -200,9 +220,9 @@ func Save(cfg *Config) error {
 	if err := saveToPath(cfg, path); err != nil {
 		return err
 	}
-	schemaPath := filepath.Join(filepath.Dir(path), schemaFile)
-	if err := os.WriteFile(schemaPath, schemaJSON, 0o600); err != nil {
-		return fmt.Errorf("write config schema: %w", err)
+	_, err = WriteSchema()
+	if err != nil {
+		return err
 	}
 	return nil
 }

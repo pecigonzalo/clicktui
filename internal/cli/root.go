@@ -27,6 +27,7 @@ tasks from the terminal.`,
 
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newBrowseCmd())
+	root.AddCommand(newConfigCmd())
 	root.AddCommand(newDebugCmd())
 
 	return root
