@@ -45,31 +45,31 @@ type Profile struct {
 	// ListID is an optional ClickUp list ID to navigate to on launch.
 	// Requires WorkspaceID and SpaceID to also be set.
 	ListID string `yaml:"list_id,omitempty" json:"list_id,omitempty"`
-	// NerdFont enables Nerd Font icons for enhanced terminal rendering.
-	NerdFont bool `yaml:"nerd_font" json:"nerd_font"`
-}
-
-// NerdFontEnabled reports whether Nerd Font icons should be used.
-// The CLICKTUI_NERD_FONTS environment variable overrides the profile setting:
-// "1", "true", or "yes" (case-insensitive) forces it on;
-// "0", "false", or "no" forces it off.
-// If unset, the profile's NerdFont field is used.
-func (p *Profile) NerdFontEnabled() bool {
-	switch strings.ToLower(os.Getenv("CLICKTUI_NERD_FONTS")) {
-	case "1", "true", "yes":
-		return true
-	case "0", "false", "no":
-		return false
-	}
-	return p.NerdFont
 }
 
 // Config is the top-level application configuration.
 type Config struct {
 	// ActiveProfile is the name of the currently selected profile.
 	ActiveProfile string `yaml:"active_profile" json:"active_profile"`
+	// NerdFont enables Nerd Font icons for enhanced terminal rendering.
+	NerdFont bool `yaml:"nerd_font" json:"nerd_font"`
 	// Profiles holds all configured profiles keyed by name.
 	Profiles map[string]*Profile `yaml:"profiles" json:"profiles"`
+}
+
+// NerdFontEnabled reports whether Nerd Font icons should be used.
+// The CLICKTUI_NERD_FONTS environment variable overrides the config setting:
+// "1", "true", or "yes" (case-insensitive) forces it on;
+// "0", "false", or "no" forces it off.
+// If unset, the config's NerdFont field is used.
+func (c *Config) NerdFontEnabled() bool {
+	switch strings.ToLower(os.Getenv("CLICKTUI_NERD_FONTS")) {
+	case "1", "true", "yes":
+		return true
+	case "0", "false", "no":
+		return false
+	}
+	return c.NerdFont
 }
 
 var (

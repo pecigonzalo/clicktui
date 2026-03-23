@@ -9,6 +9,11 @@
       "default": "default",
       "description": "Name of the currently active profile."
     },
+    "nerd_font": {
+      "type": "boolean",
+      "description": "Enable Nerd Font icons for enhanced terminal rendering.",
+      "default": false
+    },
     "profiles": {
       "type": "object",
       "description": "Map of profile names to profile configurations.",
@@ -43,11 +48,6 @@
         "list_id": {
           "type": "string",
           "description": "ClickUp list ID for direct navigation. Requires workspace_id and space_id to also be set."
-        },
-        "nerd_font": {
-          "type": "boolean",
-          "description": "Enable Nerd Font icons for enhanced terminal rendering",
-          "default": false
         }
       },
       "required": ["name", "auth_method"],
@@ -65,6 +65,7 @@
   "examples": [
     {
       "active_profile": "default",
+      "nerd_font": false,
       "profiles": {
         "default": {
           "name": "default",
