@@ -76,6 +76,7 @@ type Task struct {
 	DateUpdated string     `json:"date_updated"`
 	URL         string     `json:"url"`
 	Parent      string     `json:"parent"`
+	Subtasks    []Task     `json:"subtasks,omitempty"`
 	List        TaskRef    `json:"list"`
 	Folder      TaskRef    `json:"folder"`
 	Space       TaskRef    `json:"space"`

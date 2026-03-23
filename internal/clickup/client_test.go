@@ -367,3 +367,79 @@ func TestUpdateTaskStatus_RateLimit(t *testing.T) {
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, 429, apiErr.StatusCode)
 }
+
+func TestTasks_SendsSubtasksParam(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/list/l1/task", r.URL.Path)
+		assert.Equal(t, "true", r.URL.Query().Get("subtasks"))
+		assert.Equal(t, "0", r.URL.Query().Get("page"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tasks": []map[string]any{
+				{"id": "t1", "name": "Parent task", "parent": ""},
+				{"id": "t2", "name": "Child task", "parent": "t1"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	tasks, err := client.Tasks(context.Background(), "l1", 0)
+	require.NoError(t, err)
+	require.Len(t, tasks, 2)
+	assert.Equal(t, "t1", tasks[0].ID)
+	assert.Equal(t, "", tasks[0].Parent)
+	assert.Equal(t, "t2", tasks[1].ID)
+	assert.Equal(t, "t1", tasks[1].Parent)
+}
+
+func TestTask_SendsIncludeSubtasksParam(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/task/t1", r.URL.Path)
+		assert.Equal(t, "true", r.URL.Query().Get("include_subtasks"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "t1",
+			"name": "Parent task",
+			"subtasks": []map[string]any{
+				{"id": "t2", "name": "Child A", "parent": "t1"},
+				{"id": "t3", "name": "Child B", "parent": "t1"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	task, err := client.Task(context.Background(), "t1")
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, "t1", task.ID)
+	assert.Equal(t, "Parent task", task.Name)
+	require.Len(t, task.Subtasks, 2)
+	assert.Equal(t, "t2", task.Subtasks[0].ID)
+	assert.Equal(t, "Child A", task.Subtasks[0].Name)
+	assert.Equal(t, "t1", task.Subtasks[0].Parent)
+	assert.Equal(t, "t3", task.Subtasks[1].ID)
+	assert.Equal(t, "Child B", task.Subtasks[1].Name)
+}
+
+func TestTask_SubtasksEmptyWhenAbsent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "true", r.URL.Query().Get("include_subtasks"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "t1",
+			"name": "Leaf task",
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	task, err := client.Task(context.Background(), "t1")
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Empty(t, task.Subtasks)
+}

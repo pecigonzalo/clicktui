@@ -17,10 +17,12 @@ const pageStatusPicker = "status_picker"
 // TaskDetailPane shows detailed information about a selected task.
 type TaskDetailPane struct {
 	*tview.TextView
-	tuiApp   *App
-	taskID   string
-	listID   string
-	taskName string
+	tuiApp     *App
+	taskID     string
+	listID     string
+	taskName   string
+	parentID   string   // parent task ID for navigation (empty for top-level)
+	subtaskIDs []string // ordered subtask IDs for numeric key navigation
 }
 
 // NewTaskDetailPane creates an empty task detail pane.
@@ -44,9 +46,24 @@ func (td *TaskDetailPane) CurrentTaskID() string {
 }
 
 func (td *TaskDetailPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
-	if event.Key() == tcell.KeyRune && event.Rune() == 's' {
+	if event.Key() != tcell.KeyRune {
+		return event
+	}
+	switch r := event.Rune(); {
+	case r == 's':
 		if td.taskID != "" {
 			td.openStatusPicker()
+			return nil
+		}
+	case r == 'p':
+		if td.parentID != "" {
+			td.LoadDetail(td.parentID)
+			return nil
+		}
+	case r >= '1' && r <= '9':
+		idx := int(r - '1')
+		if idx < len(td.subtaskIDs) {
+			td.LoadDetail(td.subtaskIDs[idx])
 			return nil
 		}
 	}
@@ -125,6 +142,8 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 			"Enter:select",
 			"[:toggle tree",
 			"s:update status",
+			"p:parent",
+			"1-9:subtask",
 			"q:quit",
 		)
 	}
@@ -281,6 +300,13 @@ func statusTypeLabel(t string) string {
 }
 
 func (td *TaskDetailPane) render(d *app.TaskDetail) {
+	// Store navigation data for the input handler.
+	td.parentID = d.Parent
+	td.subtaskIDs = make([]string, len(d.Subtasks))
+	for i, st := range d.Subtasks {
+		td.subtaskIDs[i] = st.ID
+	}
+
 	var b strings.Builder
 
 	// ── Title block ──────────────────────────────────────────────────────────
@@ -339,7 +365,25 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Folder"), tagColor(ColorDetailValue), tview.Escape(d.Folder))
 	fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("List"), tagColor(ColorDetailValue), tview.Escape(d.List))
 	if d.Parent != "" {
-		fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Parent"), tagColor(ColorDetailValue), d.Parent)
+		fmt.Fprintf(&b, "%s  %s▸ %s[-]  %s[[]p] go to parent[-]\n",
+			detailLabel("Parent"),
+			tagColor(ColorDetailValue),
+			tview.Escape(d.Parent),
+			tagColor(ColorTextSubtle))
+	}
+
+	// ── Subtasks ─────────────────────────────────────────────────────────────
+	if len(d.Subtasks) > 0 {
+		b.WriteString("\n" + sectionHeader(fmt.Sprintf("Subtasks (%d)", len(d.Subtasks))) + "\n")
+		for _, st := range d.Subtasks {
+			fmt.Fprintf(&b, "%s▸[-] %s%s[-]  %s  %s%s[-]\n",
+				tagColor(ColorDetailValue),
+				tagColor(ColorTextSubtle),
+				tview.Escape(st.ID),
+				statusBadge(st.Status),
+				tagColor(ColorDetailValue),
+				tview.Escape(st.Name))
+		}
 	}
 
 	// ── URL ──────────────────────────────────────────────────────────────────
@@ -354,8 +398,16 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 		fmt.Fprintf(&b, "%s%s[-]\n", tagColor(ColorDetailValue), tview.Escape(d.Description))
 	}
 
-	// ── Action hint ──────────────────────────────────────────────────────────
-	b.WriteString("\n" + tagColor(ColorTextSubtle) + "[s] update status[-]")
+	// ── Action hints ─────────────────────────────────────────────────────────
+	var hints []string
+	hints = append(hints, "[[]s] update status")
+	if td.parentID != "" {
+		hints = append(hints, "[[]p] go to parent")
+	}
+	if len(td.subtaskIDs) > 0 {
+		hints = append(hints, "[[]1-N] open subtask")
+	}
+	b.WriteString("\n" + tagColor(ColorTextSubtle) + strings.Join(hints, "  ") + "[-]")
 
 	td.SetText(b.String())
 	td.ScrollToBeginning()

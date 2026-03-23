@@ -213,6 +213,8 @@ func (a *App) buildLayout() {
 		"/:filter",
 		"[:toggle tree",
 		"s:update status",
+		"p:parent",
+		"1-9:subtask",
 		"y:copy id",
 		"q:quit",
 	)
@@ -377,6 +379,8 @@ func (a *App) restoreDefaultHelp() {
 		"/:filter",
 		"[:toggle tree",
 		"s:update status",
+		"p:parent",
+		"1-9:subtask",
 		"y:copy id",
 		"q:quit",
 	)

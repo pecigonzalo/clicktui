@@ -80,6 +80,10 @@ func (tlp *TaskListPane) fetchPage() {
 			if tlp.page == 0 {
 				tlp.allTasks = tasks
 			} else {
+				// Each page is already ordered by orderByParent in LoadTasks.
+				// Cross-page parent/child splits are not re-ordered here — a
+				// rare edge case since the ClickUp API returns subtasks adjacent
+				// to their parents in practice. Known limitation for v1.
 				tlp.allTasks = append(tlp.allTasks, tasks...)
 			}
 			tlp.reapplyFilter()
@@ -145,8 +149,15 @@ func (tlp *TaskListPane) render() {
 			SetExpansion(3).
 			SetMaxWidth(18))
 
-		tlp.SetCell(row, 1, tview.NewTableCell(tview.Escape(t.Name)).
-			SetTextColor(ColorText).
+		// Subtasks are indented and dimmed to show hierarchy at a glance.
+		nameText := tview.Escape(t.Name)
+		nameColor := ColorText
+		if t.Parent != "" {
+			nameText = "  ↳ " + nameText
+			nameColor = ColorTextMuted
+		}
+		tlp.SetCell(row, 1, tview.NewTableCell(nameText).
+			SetTextColor(nameColor).
 			SetExpansion(8))
 
 		// Priority: symbol prefix for compact at-a-glance scanning.

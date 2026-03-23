@@ -17,6 +17,14 @@ type TaskSummary struct {
 	Name     string
 	Status   string
 	Priority string
+	Parent   string // parent task ID, empty for top-level tasks
+}
+
+// SubtaskSummary is a lightweight summary of a subtask for the detail view.
+type SubtaskSummary struct {
+	ID     string
+	Name   string
+	Status string
 }
 
 // TaskDetail is a display-oriented view of a single task for the detail pane.
@@ -40,6 +48,7 @@ type TaskDetail struct {
 	ListID      string
 	Folder      string
 	Space       string
+	Subtasks    []SubtaskSummary
 }
 
 // StatusOption is a display-oriented status value for the status picker.
@@ -60,6 +69,8 @@ func NewTaskService(api ClickUpAPI) *TaskService {
 }
 
 // LoadTasks returns a page of task summaries for a list.
+// Summaries are ordered so that each parent task is immediately followed by
+// its children, preserving original API order among peers.
 func (s *TaskService) LoadTasks(ctx context.Context, listID string, page int) ([]TaskSummary, error) {
 	tasks, err := s.api.Tasks(ctx, listID, page)
 	if err != nil {
@@ -72,9 +83,10 @@ func (s *TaskService) LoadTasks(ctx context.Context, listID string, page int) ([
 			Name:     t.Name,
 			Status:   t.Status.Status,
 			Priority: priorityName(t.Priority),
+			Parent:   t.Parent,
 		}
 	}
-	return summaries, nil
+	return orderByParent(summaries), nil
 }
 
 // LoadTaskDetail returns full details for a single task.
@@ -124,6 +136,14 @@ func taskToDetail(t *clickup.Task) *TaskDetail {
 	for i, tag := range t.Tags {
 		tags[i] = tag.Name
 	}
+	subtasks := make([]SubtaskSummary, len(t.Subtasks))
+	for i, st := range t.Subtasks {
+		subtasks[i] = SubtaskSummary{
+			ID:     st.ID,
+			Name:   st.Name,
+			Status: st.Status.Status,
+		}
+	}
 	return &TaskDetail{
 		ID:          t.ID,
 		CustomID:    t.CustomID,
@@ -144,7 +164,63 @@ func taskToDetail(t *clickup.Task) *TaskDetail {
 		ListID:      t.List.ID,
 		Folder:      t.Folder.Name,
 		Space:       t.Space.Name,
+		Subtasks:    subtasks,
 	}
+}
+
+// orderByParent reorders a flat list of task summaries so that each parent is
+// immediately followed by its children. The relative order among top-level
+// tasks and among siblings is preserved from the original input.
+// Orphan subtasks (whose parent is not in the slice) are treated as top-level.
+// The input slice is not mutated.
+func orderByParent(tasks []TaskSummary) []TaskSummary {
+	if len(tasks) == 0 {
+		return tasks
+	}
+
+	// Build a set of IDs present in the input.
+	present := make(map[string]struct{}, len(tasks))
+	for _, t := range tasks {
+		present[t.ID] = struct{}{}
+	}
+
+	// Build parentID → children map, preserving input order.
+	children := make(map[string][]TaskSummary)
+	for _, t := range tasks {
+		if t.Parent != "" {
+			if _, ok := present[t.Parent]; ok {
+				children[t.Parent] = append(children[t.Parent], t)
+			}
+		}
+	}
+
+	result := make([]TaskSummary, 0, len(tasks))
+	placed := make(map[string]struct{}, len(tasks))
+
+	// Walk the input: emit top-level tasks and orphans, followed by children.
+	for _, t := range tasks {
+		if _, ok := placed[t.ID]; ok {
+			continue
+		}
+		isChildOfPresent := false
+		if t.Parent != "" {
+			if _, ok := present[t.Parent]; ok {
+				isChildOfPresent = true
+			}
+		}
+		if isChildOfPresent {
+			// Will be emitted after its parent.
+			continue
+		}
+		result = append(result, t)
+		placed[t.ID] = struct{}{}
+		for _, child := range children[t.ID] {
+			result = append(result, child)
+			placed[child.ID] = struct{}{}
+		}
+	}
+
+	return result
 }
 
 func priorityName(p *clickup.Priority) string {
