@@ -108,6 +108,20 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 	list.SetMainTextStyle(tcell.StyleDefault.Foreground(ColorDetailValue))
 	list.SetSecondaryTextStyle(tcell.StyleDefault.Foreground(ColorTextMuted))
 
+	// dismissModal closes the picker, restores focus chrome, and resets footer
+	// help to the default keybinding set.
+	dismissModal := func() {
+		td.tuiApp.pages.RemovePage(pageStatusPicker)
+		td.tuiApp.setFocusPane(paneTaskDetail)
+		td.tuiApp.footer.SetHelp(
+			"Tab:next pane",
+			"Shift+Tab:prev pane",
+			"Enter:select",
+			"s:update status",
+			"q:quit",
+		)
+	}
+
 	for _, s := range statuses {
 		// Capture loop variable for closure.
 		chosen := s.Name
@@ -120,8 +134,7 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 		main := dot + " " + tview.Escape(s.Name)
 
 		list.AddItem(main, typeLabel, 0, func() {
-			td.tuiApp.pages.RemovePage(pageStatusPicker)
-			td.tuiApp.tviewApp.SetFocus(td.tuiApp.taskDetail.TextView)
+			dismissModal()
 			td.applyStatusUpdate(taskID, chosen)
 		})
 	}
@@ -132,16 +145,14 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 		"press Esc or Enter to dismiss",
 		0,
 		func() {
-			td.tuiApp.pages.RemovePage(pageStatusPicker)
-			td.tuiApp.tviewApp.SetFocus(td.tuiApp.taskDetail.TextView)
+			dismissModal()
 			td.tuiApp.footer.SetStatusReady("Status update cancelled")
 		},
 	)
 
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEscape {
-			td.tuiApp.pages.RemovePage(pageStatusPicker)
-			td.tuiApp.tviewApp.SetFocus(td.tuiApp.taskDetail.TextView)
+			dismissModal()
 			td.tuiApp.footer.SetStatusReady("Status update cancelled")
 			return nil
 		}
@@ -193,15 +204,6 @@ func (td *TaskDetailPane) applyStatusUpdate(taskID, status string) {
 
 			// Refresh the task list so the status column reflects the change.
 			td.tuiApp.taskList.refreshCurrentTask(taskID, detail.Status)
-
-			// Restore default help keys.
-			td.tuiApp.footer.SetHelp(
-				"Tab:next pane",
-				"Shift+Tab:prev pane",
-				"Enter:select",
-				"s:update status",
-				"q:quit",
-			)
 		})
 	}()
 }

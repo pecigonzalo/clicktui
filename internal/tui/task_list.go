@@ -198,8 +198,9 @@ func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 		idx := row - 1
 		if idx >= 0 && idx < len(tlp.tasks) {
 			tlp.tuiApp.taskDetail.LoadDetail(tlp.tasks[idx].ID)
-			// Open the detail pane and let the user press s there.
-			tlp.tuiApp.tviewApp.SetFocus(tlp.tuiApp.taskDetail.TextView)
+			// Move focus to the detail pane so the user can press s there
+			// once the detail finishes loading.
+			tlp.tuiApp.setFocusPane(paneTaskDetail)
 		}
 		return nil
 	}

@@ -133,14 +133,21 @@ func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 }
 
 func (a *App) cycleFocus(delta int) {
+	a.setFocusPane(paneID((a.focusIdx + delta + len(a.focusOrder)) % len(a.focusOrder)))
+}
+
+// setFocusPane moves focus to the given pane, updates chrome on both the
+// outgoing and incoming pane, and keeps focusIdx in sync.  Use this instead of
+// calling tviewApp.SetFocus directly so that border colours always match the
+// actual focus state.
+func (a *App) setFocusPane(id paneID) {
 	prev := paneID(a.focusIdx)
-	a.focusIdx = (a.focusIdx + delta + len(a.focusOrder)) % len(a.focusOrder)
-	next := paneID(a.focusIdx)
-
-	a.paneStylers[prev].SetInactive()
-	a.paneStylers[next].SetFocused()
-
-	a.tviewApp.SetFocus(a.focusOrder[a.focusIdx])
+	if prev != id {
+		a.paneStylers[prev].SetInactive()
+	}
+	a.focusIdx = int(id)
+	a.paneStylers[id].SetFocused()
+	a.tviewApp.SetFocus(a.focusOrder[id])
 }
 
 // Run starts the TUI event loop. It blocks until the application exits.
