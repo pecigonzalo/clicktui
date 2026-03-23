@@ -5,7 +5,11 @@
 // should appear in pane files.
 package tui
 
-import "github.com/gdamore/tcell/v2"
+import (
+	"github.com/gdamore/tcell/v2"
+
+	"github.com/pecigonzalo/clicktui/internal/app"
+)
 
 // ── Semantic colour tokens ────────────────────────────────────────────────────
 
@@ -53,6 +57,12 @@ var (
 	ColorBadgePriorityNormal = tcell.ColorYellow
 	// ColorBadgePriorityLow is the foreground for "low" priority.
 	ColorBadgePriorityLow = tcell.NewHexColor(0x888888)
+)
+
+// Selection / affordances
+var (
+	// ColorPaginationHint is the foreground for the "load more" row.
+	ColorPaginationHint = tcell.NewHexColor(0x666666)
 )
 
 // Hierarchy tree node colours
@@ -120,5 +130,38 @@ func priorityColor(priority string) tcell.Color {
 		return ColorBadgePriorityLow
 	default:
 		return ColorTextMuted
+	}
+}
+
+// prioritySymbol returns a compact single-character indicator for a priority.
+// This is used alongside the full name to give a quick visual scan affordance.
+func prioritySymbol(priority string) string {
+	switch priority {
+	case "urgent":
+		return "!!"
+	case "high":
+		return " !"
+	case "normal":
+		return " -"
+	case "low":
+		return " ·"
+	default:
+		return "  "
+	}
+}
+
+// nodeKindSymbol returns a compact unicode symbol for the node kind.
+func nodeKindSymbol(k app.NodeKind) string {
+	switch k {
+	case app.NodeWorkspace:
+		return "◉"
+	case app.NodeSpace:
+		return "◈"
+	case app.NodeFolder:
+		return "▸"
+	case app.NodeList:
+		return "≡"
+	default:
+		return "·"
 	}
 }

@@ -20,6 +20,7 @@ type TaskListPane struct {
 	listName  string
 	page      int
 	isLoading bool
+	styler    *PaneStyler // set by app.go after construction
 }
 
 // NewTaskListPane creates an empty task list table.
@@ -29,6 +30,12 @@ func NewTaskListPane(a *App) *TaskListPane {
 		SetSelectable(true, false).
 		SetFixed(1, 0)
 	table.SetBorder(true)
+
+	// Selection bar: white text on blue background for clarity.
+	table.SetSelectedStyle(tcell.StyleDefault.
+		Foreground(tcell.ColorBlack).
+		Background(ColorBorderFocused).
+		Attributes(tcell.AttrBold))
 
 	tlp := &TaskListPane{
 		Table:  table,
@@ -85,16 +92,25 @@ func (tlp *TaskListPane) fetchPage() {
 
 func (tlp *TaskListPane) render() {
 	tlp.Clear()
-	tlp.SetTitle(fmt.Sprintf(" %s ", tlp.listName))
 
-	// Header row.
+	// Update the pane title via styler so focus state is preserved.
+	if tlp.styler != nil {
+		tlp.styler.title = fmt.Sprintf("%s  %s%d tasks[-]",
+			tview.Escape(tlp.listName),
+			tagColor(ColorTextMuted),
+			len(tlp.tasks),
+		)
+		tlp.styler.reapply()
+	}
+
+	// Header row — narrow status, wide task name, compact priority.
 	headers := []struct {
 		text      string
 		expansion int
 	}{
-		{"STATUS", 2},
-		{"TASK", 5},
-		{"PRIORITY", 2},
+		{"STATUS", 3},
+		{"TASK NAME", 8},
+		{"PRI", 2},
 	}
 	for i, h := range headers {
 		tlp.SetCell(0, i, tview.NewTableCell(h.text).
@@ -106,15 +122,39 @@ func (tlp *TaskListPane) render() {
 
 	for i, t := range tlp.tasks {
 		row := i + 1
-		tlp.SetCell(row, 0, tview.NewTableCell(t.Status).
+
+		// Status: dot prefix adds visual weight without requiring colour columns.
+		statusText := "● " + t.Status
+		tlp.SetCell(row, 0, tview.NewTableCell(statusText).
 			SetTextColor(ColorBadgeStatus).
-			SetExpansion(2))
-		tlp.SetCell(row, 1, tview.NewTableCell(t.Name).
+			SetExpansion(3).
+			SetMaxWidth(18))
+
+		tlp.SetCell(row, 1, tview.NewTableCell(tview.Escape(t.Name)).
 			SetTextColor(ColorText).
-			SetExpansion(5))
-		tlp.SetCell(row, 2, tview.NewTableCell(t.Priority).
+			SetExpansion(8))
+
+		// Priority: symbol prefix for compact at-a-glance scanning.
+		priSymbol := prioritySymbol(t.Priority)
+		priText := priSymbol + " " + t.Priority
+		tlp.SetCell(row, 2, tview.NewTableCell(priText).
 			SetTextColor(priorityColor(t.Priority)).
-			SetExpansion(2))
+			SetExpansion(2).
+			SetMaxWidth(12))
+	}
+
+	// Pagination affordance: show a subtle "load next page" hint row so the
+	// user knows [n] is available.
+	if len(tlp.tasks) > 0 {
+		hintRow := len(tlp.tasks) + 1
+		tlp.SetCell(hintRow, 0, tview.NewTableCell("").
+			SetSelectable(false).SetExpansion(3))
+		tlp.SetCell(hintRow, 1,
+			tview.NewTableCell(tagColor(ColorPaginationHint)+"[n] load next page[-]").
+				SetSelectable(false).
+				SetExpansion(8))
+		tlp.SetCell(hintRow, 2, tview.NewTableCell("").
+			SetSelectable(false).SetExpansion(2))
 	}
 
 	if len(tlp.tasks) > 0 {
@@ -173,9 +213,11 @@ func (tlp *TaskListPane) refreshCurrentTask(taskID, newStatus string) {
 		if t.ID == taskID {
 			tlp.tasks[i].Status = newStatus
 			row := i + 1 // header occupies row 0
-			tlp.SetCell(row, 0, tview.NewTableCell(newStatus).
+			statusText := "● " + newStatus
+			tlp.SetCell(row, 0, tview.NewTableCell(statusText).
 				SetTextColor(ColorBadgeStatus).
-				SetExpansion(2))
+				SetExpansion(3).
+				SetMaxWidth(18))
 			return
 		}
 	}

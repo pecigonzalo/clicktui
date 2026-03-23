@@ -18,8 +18,9 @@ import (
 // PaneStyler holds references needed to update a pane's chrome when focus
 // changes.
 type PaneStyler struct {
-	box   *tview.Box
-	title string
+	box     *tview.Box
+	title   string
+	focused bool
 }
 
 // newPaneStyler creates a PaneStyler for the given box and title text.
@@ -30,6 +31,7 @@ func newPaneStyler(box *tview.Box, title string) *PaneStyler {
 
 // SetFocused applies focused-pane chrome (bright border + white title).
 func (ps *PaneStyler) SetFocused() {
+	ps.focused = true
 	ps.box.SetBorderColor(ColorBorderFocused).
 		SetTitleColor(ColorTitleFocused).
 		SetTitle(" " + ps.title + " ")
@@ -37,9 +39,20 @@ func (ps *PaneStyler) SetFocused() {
 
 // SetInactive applies inactive-pane chrome (dim border + muted title).
 func (ps *PaneStyler) SetInactive() {
+	ps.focused = false
 	ps.box.SetBorderColor(ColorBorderInactive).
 		SetTitleColor(ColorTitleInactive).
 		SetTitle(" " + ps.title + " ")
+}
+
+// reapply re-renders the current focus state with the current title.
+// Call this after mutating ps.title to refresh the pane border.
+func (ps *PaneStyler) reapply() {
+	if ps.focused {
+		ps.SetFocused()
+	} else {
+		ps.SetInactive()
+	}
 }
 
 // ── Footer / status bar ───────────────────────────────────────────────────────

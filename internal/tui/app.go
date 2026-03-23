@@ -71,15 +71,24 @@ func (a *App) buildLayout() {
 	a.paneStylers[paneTaskList] = newPaneStyler(a.taskList.Box, "Tasks")
 	a.paneStylers[paneTaskDetail] = newPaneStyler(a.taskDetail.Box, "Detail")
 
+	// Give the tree pane access to its own styler so it can update the title
+	// when the selected list changes.
+	a.tree.styler = a.paneStylers[paneTree]
+	// Give the task list pane access to its styler for dynamic title updates.
+	a.taskList.styler = a.paneStylers[paneTaskList]
+
 	// Apply initial border + title styles.
 	a.paneStylers[paneTree].SetFocused()
 	a.paneStylers[paneTaskList].SetInactive()
 	a.paneStylers[paneTaskDetail].SetInactive()
 
+	// Layout: hierarchy is narrower than task list; detail gets a good share.
+	// Proportions 3:5:4 give the hierarchy enough room for deep names while the
+	// task list has the most space for scanning rows.
 	panes := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(a.tree, 0, 1, true).
-		AddItem(a.taskList, 0, 2, false).
-		AddItem(a.taskDetail, 0, 2, false)
+		AddItem(a.tree, 0, 3, true).
+		AddItem(a.taskList, 0, 5, false).
+		AddItem(a.taskDetail, 0, 4, false)
 
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(panes, 0, 1, true).
