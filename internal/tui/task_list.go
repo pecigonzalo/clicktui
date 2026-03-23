@@ -199,6 +199,7 @@ func (tlp *TaskListPane) onSelected(row, _ int) {
 	}
 	task := tlp.tasks[idx]
 	tlp.tuiApp.taskDetail.LoadDetail(task.ID)
+	tlp.tuiApp.setFocusPane(paneTaskDetail)
 }
 
 func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
