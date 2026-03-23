@@ -17,19 +17,11 @@ pre-commit:
 
     unit-tests:
       glob: "*.go"
-      run: go test -short -race -timeout 60s ./...
+      run: task test:race
 
     format-check:
       glob: "*.go"
-      run: |
-        unformatted=$(gofmt -l {staged_files})
-        if [ -n "$unformatted" ]; then
-          echo "The following files are not properly formatted:"
-          echo "$unformatted"
-          echo ""
-          echo "Run 'task format:fix' to fix formatting"
-          exit 1
-        fi
+      run: task format
 
     go-mod-tidy:
       glob: "{go.mod,go.sum,*.go}"
