@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pecigonzalo/clicktui/internal/clickup"
@@ -59,19 +60,43 @@ type StatusOption struct {
 }
 
 // TaskService loads and transforms task data for presentation.
+// It caches results in memory to reduce API calls; caches are invalidated
+// on mutations and can be explicitly evicted for manual refresh.
 type TaskService struct {
 	api ClickUpAPI
+
+	mu              sync.Mutex
+	taskDetailCache map[string]*TaskDetail    // keyed by taskID
+	taskListCache   map[string][]TaskSummary  // keyed by "listID:page"
+	statusCache     map[string][]StatusOption // keyed by listID
 }
 
 // NewTaskService creates a TaskService backed by the given API.
 func NewTaskService(api ClickUpAPI) *TaskService {
-	return &TaskService{api: api}
+	return &TaskService{
+		api:             api,
+		taskDetailCache: make(map[string]*TaskDetail),
+		taskListCache:   make(map[string][]TaskSummary),
+		statusCache:     make(map[string][]StatusOption),
+	}
 }
 
 // LoadTasks returns a page of task summaries for a list.
+// Results are cached by listID and page; subsequent calls for the same listID
+// and page return the cached value without an API call.
+// Use InvalidateTaskList to force a refresh of all pages for a list.
 // Summaries are ordered so that each parent task is immediately followed by
 // its children, preserving original API order among peers.
 func (s *TaskService) LoadTasks(ctx context.Context, listID string, page int) ([]TaskSummary, error) {
+	cacheKey := fmt.Sprintf("%s:%d", listID, page)
+
+	s.mu.Lock()
+	if cached, ok := s.taskListCache[cacheKey]; ok {
+		s.mu.Unlock()
+		return cached, nil
+	}
+	s.mu.Unlock()
+
 	tasks, err := s.api.Tasks(ctx, listID, page)
 	if err != nil {
 		return nil, fmt.Errorf("load tasks: %w", err)
@@ -86,21 +111,49 @@ func (s *TaskService) LoadTasks(ctx context.Context, listID string, page int) ([
 			Parent:   t.Parent,
 		}
 	}
-	return orderByParent(summaries), nil
+	result := orderByParent(summaries)
+
+	s.mu.Lock()
+	s.taskListCache[cacheKey] = result
+	s.mu.Unlock()
+
+	return result, nil
 }
 
 // LoadTaskDetail returns full details for a single task.
+// Results are cached by taskID; subsequent calls return the cached value.
+// Use InvalidateTaskDetail to force a refresh.
 func (s *TaskService) LoadTaskDetail(ctx context.Context, taskID string) (*TaskDetail, error) {
+	s.mu.Lock()
+	if cached, ok := s.taskDetailCache[taskID]; ok {
+		s.mu.Unlock()
+		return cached, nil
+	}
+	s.mu.Unlock()
+
 	t, err := s.api.Task(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("load task detail: %w", err)
 	}
-	return taskToDetail(t), nil
+	detail := taskToDetail(t)
+
+	s.mu.Lock()
+	s.taskDetailCache[taskID] = detail
+	s.mu.Unlock()
+
+	return detail, nil
 }
 
 // LoadListStatuses returns the available statuses for a list.
-// Statuses are list-specific and sourced live from the ClickUp API.
+// Results are cached by listID; subsequent calls return the cached value.
 func (s *TaskService) LoadListStatuses(ctx context.Context, listID string) ([]StatusOption, error) {
+	s.mu.Lock()
+	if cached, ok := s.statusCache[listID]; ok {
+		s.mu.Unlock()
+		return cached, nil
+	}
+	s.mu.Unlock()
+
 	statuses, err := s.api.ListStatuses(ctx, listID)
 	if err != nil {
 		return nil, fmt.Errorf("load list statuses: %w", err)
@@ -113,18 +166,56 @@ func (s *TaskService) LoadListStatuses(ctx context.Context, listID string) ([]St
 			Type:  st.Type,
 		}
 	}
+
+	s.mu.Lock()
+	s.statusCache[listID] = opts
+	s.mu.Unlock()
+
 	return opts, nil
 }
 
 // UpdateTaskStatus sets a task's status to the given value and returns the
 // refreshed task detail.  The status string must be a live value obtained via
 // LoadListStatuses; no status values are hard-coded here.
+//
+// On success the task detail cache for taskID is replaced with the fresh
+// result and all task list cache entries are evicted (since we don't track
+// which list contains the task).
 func (s *TaskService) UpdateTaskStatus(ctx context.Context, taskID, status string) (*TaskDetail, error) {
 	t, err := s.api.UpdateTaskStatus(ctx, taskID, status)
 	if err != nil {
 		return nil, fmt.Errorf("update task status: %w", err)
 	}
-	return taskToDetail(t), nil
+	detail := taskToDetail(t)
+
+	s.mu.Lock()
+	delete(s.taskDetailCache, taskID)
+	clear(s.taskListCache)
+	s.taskDetailCache[taskID] = detail
+	s.mu.Unlock()
+
+	return detail, nil
+}
+
+// InvalidateTaskList evicts all cached task list pages for listID so the next
+// LoadTasks call fetches fresh data from the API.
+func (s *TaskService) InvalidateTaskList(listID string) {
+	prefix := listID + ":"
+	s.mu.Lock()
+	for key := range s.taskListCache {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.taskListCache, key)
+		}
+	}
+	s.mu.Unlock()
+}
+
+// InvalidateTaskDetail evicts the cached task detail for taskID so the next
+// LoadTaskDetail call fetches fresh data from the API.
+func (s *TaskService) InvalidateTaskDetail(taskID string) {
+	s.mu.Lock()
+	delete(s.taskDetailCache, taskID)
+	s.mu.Unlock()
 }
 
 func taskToDetail(t *clickup.Task) *TaskDetail {

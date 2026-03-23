@@ -47,9 +47,18 @@ func (td *TaskDetailPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 	if event.Key() != tcell.KeyRune {
 		return event
 	}
-	if event.Rune() == 's' && td.taskID != "" {
-		td.openStatusPicker()
-		return nil
+	switch event.Rune() {
+	case 's':
+		if td.taskID != "" {
+			td.openStatusPicker()
+			return nil
+		}
+	case 'r':
+		if td.taskID != "" {
+			td.tuiApp.tasks.InvalidateTaskDetail(td.taskID)
+			td.LoadDetail(td.taskID)
+			return nil
+		}
 	}
 	return event
 }
@@ -125,6 +134,7 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 			"Enter:select",
 			"[:toggle tree",
 			"s:update status",
+			"r:reload",
 			"q:quit",
 		)
 	}

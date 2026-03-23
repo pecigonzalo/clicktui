@@ -212,6 +212,14 @@ func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 			tlp.tuiApp.setFocusPane(paneTaskDetail)
 		}
 		return nil
+	case event.Key() == tcell.KeyRune && event.Rune() == 'r':
+		if tlp.currentID != "" {
+			tlp.tuiApp.tasks.InvalidateTaskList(tlp.currentID)
+			tlp.allTasks = nil
+			tlp.tasks = nil
+			tlp.LoadTasks(tlp.currentID, tlp.listName)
+			return nil
+		}
 	}
 	return event
 }

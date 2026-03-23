@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -504,4 +505,210 @@ func TestOrderByParent_OnlySubtasks(t *testing.T) {
 	assert.Equal(t, "s1", result[0].ID)
 	assert.Equal(t, "s2", result[1].ID)
 	assert.Equal(t, "s3", result[2].ID)
+}
+
+// countingAPI wraps a fakeAPI and counts calls to the methods under test.
+// Counters use atomic ints so tests can safely read them after concurrent use.
+type countingAPI struct {
+	*fakeAPI
+	taskCalls         atomic.Int64
+	tasksCalls        atomic.Int64
+	listStatusesCalls atomic.Int64
+	updateStatusCalls atomic.Int64
+}
+
+func newCountingAPI() *countingAPI {
+	return &countingAPI{fakeAPI: newFakeAPI()}
+}
+
+func (c *countingAPI) Task(ctx context.Context, taskID string) (*clickup.Task, error) {
+	c.taskCalls.Add(1)
+	return c.fakeAPI.Task(ctx, taskID)
+}
+
+func (c *countingAPI) Tasks(ctx context.Context, listID string, page int) ([]clickup.Task, error) {
+	c.tasksCalls.Add(1)
+	return c.fakeAPI.Tasks(ctx, listID, page)
+}
+
+func (c *countingAPI) ListStatuses(ctx context.Context, listID string) ([]clickup.Status, error) {
+	c.listStatusesCalls.Add(1)
+	return c.fakeAPI.ListStatuses(ctx, listID)
+}
+
+func (c *countingAPI) UpdateTaskStatus(ctx context.Context, taskID, status string) (*clickup.Task, error) {
+	c.updateStatusCalls.Add(1)
+	return c.fakeAPI.UpdateTaskStatus(ctx, taskID, status)
+}
+
+// --- Cache behavior tests ---
+
+func TestTaskService_LoadTaskDetail_CachesResult(t *testing.T) {
+	api := newCountingAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Cached task",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l1"},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// First call — cache miss, should call API.
+	d1, err := svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, "t1", d1.ID)
+	assert.Equal(t, int64(1), api.taskCalls.Load())
+
+	// Second call — cache hit, API must not be called again.
+	d2, err := svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, d1, d2)
+	assert.Equal(t, int64(1), api.taskCalls.Load())
+}
+
+func TestTaskService_LoadTasks_CachesResult(t *testing.T) {
+	api := newCountingAPI()
+	api.tasks["l1"] = []clickup.Task{
+		{ID: "t1", Name: "Task 1", Status: clickup.Status{Status: "open"}},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// First call — cache miss.
+	s1, err := svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	require.Len(t, s1, 1)
+	assert.Equal(t, int64(1), api.tasksCalls.Load())
+
+	// Second call with the same page — cache hit, no new API call.
+	s2, err := svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	assert.Equal(t, s1, s2)
+	assert.Equal(t, int64(1), api.tasksCalls.Load())
+
+	// Call with a different page — cache miss, new API call.
+	_, err = svc.LoadTasks(ctx, "l1", 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), api.tasksCalls.Load(), "different page should not hit cache")
+}
+
+func TestTaskService_LoadListStatuses_CachesResult(t *testing.T) {
+	api := newCountingAPI()
+	api.statusesByListID["l1"] = []clickup.Status{
+		{Status: "open", Color: "#ccc", Type: "open"},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// First call — cache miss.
+	o1, err := svc.LoadListStatuses(ctx, "l1")
+	require.NoError(t, err)
+	require.Len(t, o1, 1)
+	assert.Equal(t, int64(1), api.listStatusesCalls.Load())
+
+	// Second call — cache hit.
+	o2, err := svc.LoadListStatuses(ctx, "l1")
+	require.NoError(t, err)
+	assert.Equal(t, o1, o2)
+	assert.Equal(t, int64(1), api.listStatusesCalls.Load())
+}
+
+func TestTaskService_UpdateTaskStatus_EvictsDetailAndListCaches(t *testing.T) {
+	api := newCountingAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Fix login",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l1", Name: "Sprint 42"},
+	}
+	api.tasks["l1"] = []clickup.Task{
+		{ID: "t1", Name: "Fix login", Status: clickup.Status{Status: "open"}},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// Prime both caches.
+	_, err := svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	_, err = svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), api.taskCalls.Load())
+	assert.Equal(t, int64(1), api.tasksCalls.Load())
+
+	// Mutation: update status.
+	detail, err := svc.UpdateTaskStatus(ctx, "t1", "in progress")
+	require.NoError(t, err)
+	assert.Equal(t, "in progress", detail.Status)
+
+	// LoadTaskDetail should return the fresh detail cached by UpdateTaskStatus
+	// without calling the API again.
+	d2, err := svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, "in progress", d2.Status)
+	assert.Equal(t, int64(1), api.taskCalls.Load(), "detail should be served from cache populated by UpdateTaskStatus")
+
+	// LoadTasks should miss the cache (evicted) and call API again.
+	_, err = svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), api.tasksCalls.Load(), "task list cache should have been evicted by UpdateTaskStatus")
+}
+
+func TestTaskService_InvalidateTaskDetail_CausesAPIMiss(t *testing.T) {
+	api := newCountingAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Fix login",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l1"},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// Prime cache.
+	_, err := svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), api.taskCalls.Load())
+
+	// Invalidate.
+	svc.InvalidateTaskDetail("t1")
+
+	// Next call should hit the API again.
+	_, err = svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), api.taskCalls.Load())
+}
+
+func TestTaskService_InvalidateTaskList_CausesAPIMiss(t *testing.T) {
+	api := newCountingAPI()
+	api.tasks["l1"] = []clickup.Task{
+		{ID: "t1", Name: "Task 1", Status: clickup.Status{Status: "open"}},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// Prime cache for two pages.
+	_, err := svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	_, err = svc.LoadTasks(ctx, "l1", 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), api.tasksCalls.Load())
+
+	// Invalidate by listID — should evict all pages.
+	svc.InvalidateTaskList("l1")
+
+	// Both pages should miss the cache and hit the API again.
+	_, err = svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), api.tasksCalls.Load(), "page 0 should be evicted")
+
+	_, err = svc.LoadTasks(ctx, "l1", 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), api.tasksCalls.Load(), "page 1 should be evicted")
 }

@@ -213,6 +213,7 @@ func (a *App) buildLayout() {
 		"/:filter",
 		"[:toggle tree",
 		"s:update status",
+		"r:reload",
 		"y:copy id",
 		"q:quit",
 	)
@@ -377,6 +378,7 @@ func (a *App) restoreDefaultHelp() {
 		"/:filter",
 		"[:toggle tree",
 		"s:update status",
+		"r:reload",
 		"y:copy id",
 		"q:quit",
 	)
