@@ -19,6 +19,8 @@ type ClickUpAPI interface {
 	FolderlessLists(ctx context.Context, spaceID string) ([]clickup.List, error)
 	Tasks(ctx context.Context, listID string, page int) ([]clickup.Task, error)
 	Task(ctx context.Context, taskID string) (*clickup.Task, error)
+	ListStatuses(ctx context.Context, listID string) ([]clickup.Status, error)
+	UpdateTaskStatus(ctx context.Context, taskID, status string) (*clickup.Task, error)
 }
 
 // HierarchyNode represents a single node in the workspace tree.

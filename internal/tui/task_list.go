@@ -122,15 +122,41 @@ func (tlp *TaskListPane) onSelected(row, _ int) {
 		return
 	}
 	task := tlp.tasks[idx]
-	tlp.tuiApp.taskDetail.LoadDetail(tlp.tuiApp, task.ID)
+	tlp.tuiApp.taskDetail.LoadDetail(task.ID)
 }
 
 func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
-	if event.Key() == tcell.KeyRune && event.Rune() == 'n' {
+	switch {
+	case event.Key() == tcell.KeyRune && event.Rune() == 'n':
 		// Load next page.
 		tlp.page++
 		tlp.fetchPage()
 		return nil
+	case event.Key() == tcell.KeyRune && event.Rune() == 's':
+		// Trigger status picker for the currently selected task.
+		row, _ := tlp.GetSelection()
+		idx := row - 1
+		if idx >= 0 && idx < len(tlp.tasks) {
+			tlp.tuiApp.taskDetail.LoadDetail(tlp.tasks[idx].ID)
+			// Brief delay is not needed; LoadDetail will set up taskID/listID,
+			// but the status picker requires the detail pane to be populated.
+			// Instead, open the detail pane and let the user press s there.
+			tlp.tuiApp.tviewApp.SetFocus(tlp.tuiApp.taskDetail.TextView)
+		}
+		return nil
 	}
 	return event
+}
+
+// refreshCurrentTask updates the status column for a task in the list without
+// a full reload.  Must be called from the UI goroutine.
+func (tlp *TaskListPane) refreshCurrentTask(taskID, newStatus string) {
+	for i, t := range tlp.tasks {
+		if t.ID == taskID {
+			tlp.tasks[i].Status = newStatus
+			row := i + 1 // header occupies row 0
+			tlp.SetCell(row, 0, tview.NewTableCell(newStatus).SetTextColor(tcell.ColorAqua).SetExpansion(1))
+			return
+		}
+	}
 }

@@ -4,6 +4,8 @@
 //   - Left:   workspace/space/folder/list hierarchy tree
 //   - Center: task list for the selected list
 //   - Right:  task details for the selected task
+//
+// Modal overlays (e.g. the status picker) are layered on top via tview.Pages.
 package tui
 
 import (
@@ -17,17 +19,19 @@ import (
 	"github.com/pecigonzalo/clicktui/internal/app"
 )
 
+const pageMain = "main"
+
 // App is the main TUI application.
 type App struct {
 	tviewApp   *tview.Application
 	hierarchy  *app.HierarchyService
 	tasks      *app.TaskService
 	logger     *slog.Logger
+	pages      *tview.Pages
 	tree       *TreePane
 	taskList   *TaskListPane
 	taskDetail *TaskDetailPane
 	statusBar  *tview.TextView
-	layout     *tview.Flex
 	// focusOrder tracks the panes for Tab cycling.
 	focusOrder []tview.Primitive
 	focusIdx   int
@@ -48,7 +52,7 @@ func New(hierarchy *app.HierarchyService, tasks *app.TaskService, logger *slog.L
 func (a *App) buildLayout() {
 	a.tree = NewTreePane(a)
 	a.taskList = NewTaskListPane(a)
-	a.taskDetail = NewTaskDetailPane()
+	a.taskDetail = NewTaskDetailPane(a)
 	a.statusBar = tview.NewTextView().
 		SetDynamicColors(true).
 		SetText("[yellow]Loading workspaces...")
@@ -58,9 +62,11 @@ func (a *App) buildLayout() {
 		AddItem(a.taskList.Table, 0, 2, false).
 		AddItem(a.taskDetail.TextView, 0, 2, false)
 
-	a.layout = tview.NewFlex().SetDirection(tview.FlexRow).
+	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(panes, 0, 1, true).
 		AddItem(a.statusBar, 1, 0, false)
+
+	a.pages = tview.NewPages().AddPage(pageMain, mainLayout, true, true)
 
 	a.focusOrder = []tview.Primitive{
 		a.tree.TreeView,
@@ -68,7 +74,7 @@ func (a *App) buildLayout() {
 		a.taskDetail.TextView,
 	}
 
-	a.tviewApp.SetRoot(a.layout, true)
+	a.tviewApp.SetRoot(a.pages, true)
 	a.tviewApp.SetInputCapture(a.globalInputHandler)
 }
 
@@ -121,7 +127,7 @@ func (a *App) loadWorkspaces(ctx context.Context) {
 				return
 			}
 			a.tree.SetWorkspaces(ctx, nodes)
-			a.setStatus("Ready — select a list to browse tasks. Press Tab to switch panes, q to quit.")
+			a.setStatus("Ready — select a list, press s to update status. Tab switches panes, q quits.")
 		})
 	}()
 }

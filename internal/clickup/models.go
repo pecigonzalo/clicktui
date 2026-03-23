@@ -41,8 +41,9 @@ type Folder struct {
 
 // List represents a ClickUp list (inside a folder or folderless).
 type List struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Statuses []Status `json:"statuses,omitempty"`
 }
 
 // Status represents a task status in ClickUp.

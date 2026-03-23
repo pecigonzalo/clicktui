@@ -14,18 +14,22 @@ import (
 
 // fakeAPI is an in-memory stub of the ClickUpAPI interface for testing.
 type fakeAPI struct {
-	teams         []clickup.Team
-	spaces        map[string][]clickup.Space
-	folders       map[string][]clickup.Folder
-	folderless    map[string][]clickup.List
-	tasks         map[string][]clickup.Task
-	tasksByID     map[string]*clickup.Task
-	teamsErr      error
-	spacesErr     error
-	foldersErr    error
-	folderlessErr error
-	tasksErr      error
-	taskErr       error
+	teams            []clickup.Team
+	spaces           map[string][]clickup.Space
+	folders          map[string][]clickup.Folder
+	folderless       map[string][]clickup.List
+	tasks            map[string][]clickup.Task
+	tasksByID        map[string]*clickup.Task
+	statusesByListID map[string][]clickup.Status
+	updatedTasks     map[string]*clickup.Task // taskID -> result of UpdateTaskStatus
+	teamsErr         error
+	spacesErr        error
+	foldersErr       error
+	folderlessErr    error
+	tasksErr         error
+	taskErr          error
+	listStatusesErr  error
+	updateStatusErr  error
 }
 
 func (f *fakeAPI) Teams(_ context.Context) ([]clickup.Team, error) {
@@ -56,13 +60,35 @@ func (f *fakeAPI) Task(_ context.Context, taskID string) (*clickup.Task, error) 
 	return t, f.taskErr
 }
 
+func (f *fakeAPI) ListStatuses(_ context.Context, listID string) ([]clickup.Status, error) {
+	return f.statusesByListID[listID], f.listStatusesErr
+}
+
+func (f *fakeAPI) UpdateTaskStatus(_ context.Context, taskID, status string) (*clickup.Task, error) {
+	if f.updateStatusErr != nil {
+		return nil, f.updateStatusErr
+	}
+	if t, ok := f.updatedTasks[taskID]; ok {
+		return t, nil
+	}
+	// Mirror the existing task with the new status applied.
+	if t, ok := f.tasksByID[taskID]; ok {
+		updated := *t
+		updated.Status.Status = status
+		return &updated, nil
+	}
+	return &clickup.Task{ID: taskID, Status: clickup.Status{Status: status}}, nil
+}
+
 func newFakeAPI() *fakeAPI {
 	return &fakeAPI{
-		spaces:     make(map[string][]clickup.Space),
-		folders:    make(map[string][]clickup.Folder),
-		folderless: make(map[string][]clickup.List),
-		tasks:      make(map[string][]clickup.Task),
-		tasksByID:  make(map[string]*clickup.Task),
+		spaces:           make(map[string][]clickup.Space),
+		folders:          make(map[string][]clickup.Folder),
+		folderless:       make(map[string][]clickup.List),
+		tasks:            make(map[string][]clickup.Task),
+		tasksByID:        make(map[string]*clickup.Task),
+		statusesByListID: make(map[string][]clickup.Status),
+		updatedTasks:     make(map[string]*clickup.Task),
 	}
 }
 

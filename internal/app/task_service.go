@@ -37,8 +37,16 @@ type TaskDetail struct {
 	URL         string
 	Parent      string
 	List        string
+	ListID      string
 	Folder      string
 	Space       string
+}
+
+// StatusOption is a display-oriented status value for the status picker.
+type StatusOption struct {
+	Name  string
+	Color string
+	Type  string
 }
 
 // TaskService loads and transforms task data for presentation.
@@ -78,6 +86,35 @@ func (s *TaskService) LoadTaskDetail(ctx context.Context, taskID string) (*TaskD
 	return taskToDetail(t), nil
 }
 
+// LoadListStatuses returns the available statuses for a list.
+// Statuses are list-specific and sourced live from the ClickUp API.
+func (s *TaskService) LoadListStatuses(ctx context.Context, listID string) ([]StatusOption, error) {
+	statuses, err := s.api.ListStatuses(ctx, listID)
+	if err != nil {
+		return nil, fmt.Errorf("load list statuses: %w", err)
+	}
+	opts := make([]StatusOption, len(statuses))
+	for i, st := range statuses {
+		opts[i] = StatusOption{
+			Name:  st.Status,
+			Color: st.Color,
+			Type:  st.Type,
+		}
+	}
+	return opts, nil
+}
+
+// UpdateTaskStatus sets a task's status to the given value and returns the
+// refreshed task detail.  The status string must be a live value obtained via
+// LoadListStatuses; no status values are hard-coded here.
+func (s *TaskService) UpdateTaskStatus(ctx context.Context, taskID, status string) (*TaskDetail, error) {
+	t, err := s.api.UpdateTaskStatus(ctx, taskID, status)
+	if err != nil {
+		return nil, fmt.Errorf("update task status: %w", err)
+	}
+	return taskToDetail(t), nil
+}
+
 func taskToDetail(t *clickup.Task) *TaskDetail {
 	assignees := make([]string, len(t.Assignees))
 	for i, a := range t.Assignees {
@@ -104,6 +141,7 @@ func taskToDetail(t *clickup.Task) *TaskDetail {
 		URL:         t.URL,
 		Parent:      t.Parent,
 		List:        t.List.Name,
+		ListID:      t.List.ID,
 		Folder:      t.Folder.Name,
 		Space:       t.Space.Name,
 	}

@@ -43,12 +43,19 @@ func New(provider auth.Provider) *Client {
 // SetBaseURL overrides the API base URL.  Intended for tests only.
 func (c *Client) SetBaseURL(u string) { c.baseURL = u }
 
-// do executes an authenticated request and JSON-decodes the response body
-// into out.  It returns an *APIError for non-2xx responses.
+// do executes an authenticated GET/no-body request and JSON-decodes the
+// response body into out.  It returns an *APIError for non-2xx responses.
 //
-//nolint:unparam // method is always GET in the read-only MVP; mutation endpoints will use other verbs.
+//nolint:unparam // method is always GET at current call sites; mutation uses doWithBody directly.
 func (c *Client) do(ctx context.Context, method, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	return c.doWithBody(ctx, method, path, nil, out)
+}
+
+// doWithBody executes an authenticated request with an optional body and
+// JSON-decodes the response body into out.  It returns an *APIError for
+// non-2xx responses.
+func (c *Client) doWithBody(ctx context.Context, method, path string, body io.Reader, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
@@ -66,17 +73,17 @@ func (c *Client) do(ctx context.Context, method, path string, out any) error {
 		_ = resp.Body.Close() // body is fully read before return; close error is not actionable
 	}()
 
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &APIError{StatusCode: resp.StatusCode, Body: string(body)}
+		return &APIError{StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 
 	if out != nil {
-		if err := json.Unmarshal(body, out); err != nil {
+		if err := json.Unmarshal(respBody, out); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
 	}
