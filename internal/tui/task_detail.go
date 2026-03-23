@@ -363,7 +363,7 @@ func (td *TaskDetailPane) applyStatusUpdate(taskID, status string) {
 			td.tuiApp.footer.SetStatusReady(fmt.Sprintf("Status → %q", status))
 
 			// Refresh the task list so the status column reflects the change.
-			td.tuiApp.taskList.refreshCurrentTask(taskID, detail.Status)
+			td.tuiApp.taskList.refreshCurrentTask(taskID, detail.Status, detail.StatusColor)
 		})
 	}()
 }
@@ -583,7 +583,7 @@ func (td *TaskDetailPane) renderBody(d *app.TaskDetail, sel *selectorState) {
 				icons.SubtaskPrefix,
 				tagColor(ColorTextSubtle),
 				tview.Escape(st.ID),
-				statusBadge(st.Status),
+				statusBadgeColored(st.Status, st.StatusColor),
 				tagColor(ColorDetailValue),
 				tview.Escape(st.Name))
 		}

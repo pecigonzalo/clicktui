@@ -152,9 +152,11 @@ func (tlp *TaskListPane) render() {
 		row := i + 1
 
 		// Status: dot prefix adds visual weight without requiring colour columns.
+		// Use the API-provided hex color when available; fall back to aqua.
 		statusText := icons.StatusDot + " " + t.Status
+		statusColor := statusDotColor(t.StatusColor, "")
 		tlp.SetCell(row, 0, tview.NewTableCell(statusText).
-			SetTextColor(ColorBadgeStatus).
+			SetTextColor(statusColor).
 			SetExpansion(3).
 			SetMaxWidth(18))
 
@@ -226,12 +228,13 @@ func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 
 // refreshCurrentTask updates the status column for a task in the list without
 // a full reload.  Must be called from the UI goroutine.
-func (tlp *TaskListPane) refreshCurrentTask(taskID, newStatus string) {
+func (tlp *TaskListPane) refreshCurrentTask(taskID, newStatus, newStatusColor string) {
 	// Update allTasks (the canonical unfiltered set) so restoring from filter
 	// picks up the new status.
 	for i, t := range tlp.allTasks {
 		if t.ID == taskID {
 			tlp.allTasks[i].Status = newStatus
+			tlp.allTasks[i].StatusColor = newStatusColor
 			break
 		}
 	}
@@ -248,10 +251,12 @@ func (tlp *TaskListPane) refreshCurrentTask(taskID, newStatus string) {
 	for i, t := range tlp.tasks {
 		if t.ID == taskID {
 			tlp.tasks[i].Status = newStatus
+			tlp.tasks[i].StatusColor = newStatusColor
 			row := i + 1 // header occupies row 0
 			statusText := icons.StatusDot + " " + newStatus
+			statusColor := statusDotColor(newStatusColor, "")
 			tlp.SetCell(row, 0, tview.NewTableCell(statusText).
-				SetTextColor(ColorBadgeStatus).
+				SetTextColor(statusColor).
 				SetExpansion(3).
 				SetMaxWidth(18))
 			return

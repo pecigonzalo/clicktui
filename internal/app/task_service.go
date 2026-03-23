@@ -14,18 +14,20 @@ import (
 
 // TaskSummary is a display-oriented view of a task for the list pane.
 type TaskSummary struct {
-	ID       string
-	Name     string
-	Status   string
-	Priority string
-	Parent   string // parent task ID, empty for top-level tasks
+	ID          string
+	Name        string
+	Status      string
+	StatusColor string // hex color from the API, e.g. "#ff6b6b"; empty when absent
+	Priority    string
+	Parent      string // parent task ID, empty for top-level tasks
 }
 
 // SubtaskSummary is a lightweight summary of a subtask for the detail view.
 type SubtaskSummary struct {
-	ID     string
-	Name   string
-	Status string
+	ID          string
+	Name        string
+	Status      string
+	StatusColor string // hex color from the API, e.g. "#ff6b6b"; empty when absent
 }
 
 // TaskDetail is a display-oriented view of a single task for the detail pane.
@@ -104,11 +106,12 @@ func (s *TaskService) LoadTasks(ctx context.Context, listID string, page int) ([
 	summaries := make([]TaskSummary, len(tasks))
 	for i, t := range tasks {
 		summaries[i] = TaskSummary{
-			ID:       t.ID,
-			Name:     t.Name,
-			Status:   t.Status.Status,
-			Priority: priorityName(t.Priority),
-			Parent:   t.Parent,
+			ID:          t.ID,
+			Name:        t.Name,
+			Status:      t.Status.Status,
+			StatusColor: t.Status.Color,
+			Priority:    priorityName(t.Priority),
+			Parent:      t.Parent,
 		}
 	}
 	result := orderByParent(summaries)
@@ -230,9 +233,10 @@ func taskToDetail(t *clickup.Task) *TaskDetail {
 	subtasks := make([]SubtaskSummary, len(t.Subtasks))
 	for i, st := range t.Subtasks {
 		subtasks[i] = SubtaskSummary{
-			ID:     st.ID,
-			Name:   st.Name,
-			Status: st.Status.Status,
+			ID:          st.ID,
+			Name:        st.Name,
+			Status:      st.Status.Status,
+			StatusColor: st.Status.Color,
 		}
 	}
 	return &TaskDetail{

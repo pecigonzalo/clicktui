@@ -21,6 +21,7 @@ func TestTaskService_LoadTasks(t *testing.T) {
 			Name: "Fix login",
 			Status: clickup.Status{
 				Status: "in progress",
+				Color:  "#ff6b6b",
 			},
 			Priority: &clickup.Priority{Name: "high"},
 		},
@@ -41,10 +42,12 @@ func TestTaskService_LoadTasks(t *testing.T) {
 	assert.Equal(t, "t1", summaries[0].ID)
 	assert.Equal(t, "Fix login", summaries[0].Name)
 	assert.Equal(t, "in progress", summaries[0].Status)
+	assert.Equal(t, "#ff6b6b", summaries[0].StatusColor)
 	assert.Equal(t, "high", summaries[0].Priority)
 	assert.Empty(t, summaries[0].Parent, "top-level task should have empty Parent")
 
 	assert.Equal(t, "none", summaries[1].Priority)
+	assert.Empty(t, summaries[1].StatusColor, "missing color should remain empty")
 }
 
 func TestTaskService_LoadTasks_Error(t *testing.T) {
@@ -331,12 +334,12 @@ func TestTaskService_LoadTaskDetail_WithSubtasks(t *testing.T) {
 			{
 				ID:     "st1",
 				Name:   "Subtask one",
-				Status: clickup.Status{Status: "open"},
+				Status: clickup.Status{Status: "open", Color: "#d3d3d3"},
 			},
 			{
 				ID:     "st2",
 				Name:   "Subtask two",
-				Status: clickup.Status{Status: "done"},
+				Status: clickup.Status{Status: "done", Color: "#00ff00"},
 			},
 		},
 	}
@@ -349,10 +352,12 @@ func TestTaskService_LoadTaskDetail_WithSubtasks(t *testing.T) {
 	assert.Equal(t, "st1", detail.Subtasks[0].ID)
 	assert.Equal(t, "Subtask one", detail.Subtasks[0].Name)
 	assert.Equal(t, "open", detail.Subtasks[0].Status)
+	assert.Equal(t, "#d3d3d3", detail.Subtasks[0].StatusColor)
 
 	assert.Equal(t, "st2", detail.Subtasks[1].ID)
 	assert.Equal(t, "Subtask two", detail.Subtasks[1].Name)
 	assert.Equal(t, "done", detail.Subtasks[1].Status)
+	assert.Equal(t, "#00ff00", detail.Subtasks[1].StatusColor)
 }
 
 func TestTaskService_LoadTaskDetail_NoSubtasks(t *testing.T) {
