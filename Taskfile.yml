@@ -35,6 +35,18 @@ tasks:
     cmds:
       - go test -short -timeout=60s -cover ./...
 
+  smoke:
+    desc: Build binary and run a quick auth smoke-check (requires CLICKTUI_TOKEN env var)
+    deps: [build]
+    cmds:
+      - |
+        if [ -z "${CLICKTUI_TOKEN}" ]; then
+          echo "CLICKTUI_TOKEN is not set — skipping live smoke test"
+          exit 0
+        fi
+        ./bin/{{.BINARY_NAME}} auth login --token "${CLICKTUI_TOKEN}"
+        ./bin/{{.BINARY_NAME}} auth status
+
   clean:
     desc: Remove build artifacts
     cmds:

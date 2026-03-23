@@ -55,6 +55,31 @@ Launch the TUI to browse your workspace hierarchy and tasks:
 - `n` — load next page of tasks (in task list pane)
 - `q` — quit
 
+## Developer commands
+
+| Command | Description |
+|---|---|
+| `task build` | Compile `./bin/clicktui` |
+| `task test` | Run unit tests |
+| `task test:race` | Run unit tests with race detection |
+| `task test:coverage` | Run tests with coverage summary |
+| `task lint` | Run golangci-lint |
+| `task lint:fix` | Run golangci-lint with auto-fix |
+| `task format` | Check formatting (diff only) |
+| `task format:fix` | Apply formatting in place |
+| `task smoke` | Build + auth smoke-check (requires `CLICKTUI_TOKEN` env var) |
+| `task hooks:install` | Install git hooks via lefthook |
+| `task hooks:run` | Run pre-commit hooks manually |
+| `task clean` | Remove build artifacts |
+
+### Smoke test
+
+Requires a live ClickUp personal API token:
+
+```sh
+CLICKTUI_TOKEN=pk_... task smoke
+```
+
 ## Project layout
 
 ```

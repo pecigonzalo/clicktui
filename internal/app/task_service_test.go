@@ -245,3 +245,46 @@ func TestTaskService_UpdateTaskStatus_RateLimit(t *testing.T) {
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, 429, apiErr.StatusCode)
 }
+
+func TestTaskService_LoadTaskDetail_LongDescription(t *testing.T) {
+	// Verify that descriptions longer than 500 chars are truncated.
+	long := make([]byte, 600)
+	for i := range long {
+		long[i] = 'x'
+	}
+	api := newFakeAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:          "t1",
+		Name:        "Long desc",
+		Status:      clickup.Status{Status: "open"},
+		Description: string(long),
+		List:        clickup.TaskRef{ID: "l1"},
+	}
+
+	svc := app.NewTaskService(api)
+	detail, err := svc.LoadTaskDetail(context.Background(), "t1")
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(detail.Description), 503) // 500 + "..."
+	assert.True(t, len(detail.Description) > 0)
+}
+
+func TestTaskService_LoadTaskDetail_InvalidDateFormat(t *testing.T) {
+	// A non-numeric date string should be returned as-is rather than failing.
+	api := newFakeAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:          "t1",
+		Name:        "Bad date",
+		Status:      clickup.Status{Status: "open"},
+		DueDate:     "not-a-timestamp",
+		DateCreated: "null",
+		List:        clickup.TaskRef{ID: "l1"},
+	}
+
+	svc := app.NewTaskService(api)
+	detail, err := svc.LoadTaskDetail(context.Background(), "t1")
+	require.NoError(t, err)
+	// Invalid epoch strings are returned verbatim.
+	assert.Equal(t, "not-a-timestamp", detail.DueDate)
+	// "null" should produce an empty string.
+	assert.Empty(t, detail.DateCreated)
+}

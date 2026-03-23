@@ -192,3 +192,35 @@ func TestHierarchyService_LoadSpaceContents_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, nodes)
 }
+
+func TestHierarchyService_LoadSpaces_Error(t *testing.T) {
+	api := newFakeAPI()
+	api.spacesErr = errors.New("api failure")
+
+	svc := app.NewHierarchyService(api)
+	_, err := svc.LoadSpaces(context.Background(), "t1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "load spaces")
+}
+
+func TestHierarchyService_LoadSpaceContents_FoldersError(t *testing.T) {
+	api := newFakeAPI()
+	api.foldersErr = errors.New("forbidden")
+
+	svc := app.NewHierarchyService(api)
+	_, err := svc.LoadSpaceContents(context.Background(), "s1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "load folders")
+}
+
+func TestHierarchyService_LoadSpaceContents_FolderlessError(t *testing.T) {
+	api := newFakeAPI()
+	// Folders succeed but folderless lists fail.
+	api.folders["s1"] = []clickup.Folder{}
+	api.folderlessErr = errors.New("rate limited")
+
+	svc := app.NewHierarchyService(api)
+	_, err := svc.LoadSpaceContents(context.Background(), "s1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "load folderless lists")
+}
