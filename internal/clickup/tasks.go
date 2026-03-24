@@ -6,6 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 )
 
 type tasksResponse struct {
@@ -55,6 +58,41 @@ func (c *Client) UpdateTaskStatus(ctx context.Context, taskID, status string) (*
 	var out Task
 	if err := c.doWithBody(ctx, "PUT", fmt.Sprintf("/task/%s", taskID), bytes.NewReader(body), &out); err != nil {
 		return nil, err
+	}
+	return &out, nil
+}
+
+// MoveTaskToList moves a task's home list using the dedicated v3 endpoint.
+func (c *Client) MoveTaskToList(ctx context.Context, workspaceID, taskID, listID string) (*Task, error) {
+	// This operation is available only in v3, while the rest of this client
+	// targets v2. Use an absolute URL request and shared auth/HTTP plumbing.
+	v3Base := strings.TrimSuffix(c.baseURL, "/api/v2")
+	url := fmt.Sprintf("%s/api/v3/workspaces/%s/tasks/%s/home_list/%s", v3Base, workspaceID, taskID, listID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if err := c.provider.Authorize(ctx, req); err != nil {
+		return nil, fmt.Errorf("authorize request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http PUT v3 move task: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(respBody)}
+	}
+	var out Task
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return &out, nil
 }

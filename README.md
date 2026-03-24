@@ -56,6 +56,7 @@ Launch the TUI to browse your workspace hierarchy and tasks:
 - `Tab`/`Shift+Tab` — cycle between panes (hierarchy, task list, details)
 - `Enter` — expand tree nodes or select tasks
 - `s` — open status picker (task list or detail pane)
+- `m` — move the selected task to another list (detail pane)
 - `n` — load next page of tasks (task list pane)
 - `q` — quit
 
