@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/pecigonzalo/clicktui/internal/clickup"
 )
 
@@ -64,6 +66,10 @@ type StatusOption struct {
 // TaskService loads and transforms task data for presentation.
 // It caches results in memory to reduce API calls; caches are invalidated
 // on mutations and can be explicitly evicted for manual refresh.
+//
+// A singleflight.Group deduplicates concurrent cache-miss fetches for the
+// same key.  Invalidation methods call group.Forget so the next request
+// after eviction always reaches the API.
 type TaskService struct {
 	api ClickUpAPI
 
@@ -71,6 +77,8 @@ type TaskService struct {
 	taskDetailCache map[string]*TaskDetail    // keyed by taskID
 	taskListCache   map[string][]TaskSummary  // keyed by "listID:page"
 	statusCache     map[string][]StatusOption // keyed by listID
+
+	group singleflight.Group
 }
 
 // NewTaskService creates a TaskService backed by the given API.
@@ -91,6 +99,7 @@ func NewTaskService(api ClickUpAPI) *TaskService {
 // its children, preserving original API order among peers.
 func (s *TaskService) LoadTasks(ctx context.Context, listID string, page int) ([]TaskSummary, error) {
 	cacheKey := fmt.Sprintf("%s:%d", listID, page)
+	sfKey := "tasks:" + cacheKey
 
 	s.mu.Lock()
 	if cached, ok := s.taskListCache[cacheKey]; ok {
@@ -99,34 +108,42 @@ func (s *TaskService) LoadTasks(ctx context.Context, listID string, page int) ([
 	}
 	s.mu.Unlock()
 
-	tasks, err := s.api.Tasks(ctx, listID, page)
-	if err != nil {
-		return nil, fmt.Errorf("load tasks: %w", err)
-	}
-	summaries := make([]TaskSummary, len(tasks))
-	for i, t := range tasks {
-		summaries[i] = TaskSummary{
-			ID:          t.ID,
-			Name:        t.Name,
-			Status:      t.Status.Status,
-			StatusColor: t.Status.Color,
-			Priority:    priorityName(t.Priority),
-			Parent:      t.Parent,
+	v, err, _ := s.group.Do(sfKey, func() (any, error) {
+		tasks, err := s.api.Tasks(ctx, listID, page)
+		if err != nil {
+			return nil, fmt.Errorf("load tasks: %w", err)
 		}
+		summaries := make([]TaskSummary, len(tasks))
+		for i, t := range tasks {
+			summaries[i] = TaskSummary{
+				ID:          t.ID,
+				Name:        t.Name,
+				Status:      t.Status.Status,
+				StatusColor: t.Status.Color,
+				Priority:    priorityName(t.Priority),
+				Parent:      t.Parent,
+			}
+		}
+		result := orderByParent(summaries)
+
+		s.mu.Lock()
+		s.taskListCache[cacheKey] = result
+		s.mu.Unlock()
+
+		return result, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	result := orderByParent(summaries)
-
-	s.mu.Lock()
-	s.taskListCache[cacheKey] = result
-	s.mu.Unlock()
-
-	return result, nil
+	return v.([]TaskSummary), nil
 }
 
 // LoadTaskDetail returns full details for a single task.
 // Results are cached by taskID; subsequent calls return the cached value.
 // Use InvalidateTaskDetail to force a refresh.
 func (s *TaskService) LoadTaskDetail(ctx context.Context, taskID string) (*TaskDetail, error) {
+	sfKey := "detail:" + taskID
+
 	s.mu.Lock()
 	if cached, ok := s.taskDetailCache[taskID]; ok {
 		s.mu.Unlock()
@@ -134,22 +151,30 @@ func (s *TaskService) LoadTaskDetail(ctx context.Context, taskID string) (*TaskD
 	}
 	s.mu.Unlock()
 
-	t, err := s.api.Task(ctx, taskID)
+	v, err, _ := s.group.Do(sfKey, func() (any, error) {
+		t, err := s.api.Task(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("load task detail: %w", err)
+		}
+		detail := taskToDetail(t)
+
+		s.mu.Lock()
+		s.taskDetailCache[taskID] = detail
+		s.mu.Unlock()
+
+		return detail, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("load task detail: %w", err)
+		return nil, err
 	}
-	detail := taskToDetail(t)
-
-	s.mu.Lock()
-	s.taskDetailCache[taskID] = detail
-	s.mu.Unlock()
-
-	return detail, nil
+	return v.(*TaskDetail), nil
 }
 
 // LoadListStatuses returns the available statuses for a list.
 // Results are cached by listID; subsequent calls return the cached value.
 func (s *TaskService) LoadListStatuses(ctx context.Context, listID string) ([]StatusOption, error) {
+	sfKey := "statuses:" + listID
+
 	s.mu.Lock()
 	if cached, ok := s.statusCache[listID]; ok {
 		s.mu.Unlock()
@@ -157,24 +182,30 @@ func (s *TaskService) LoadListStatuses(ctx context.Context, listID string) ([]St
 	}
 	s.mu.Unlock()
 
-	statuses, err := s.api.ListStatuses(ctx, listID)
-	if err != nil {
-		return nil, fmt.Errorf("load list statuses: %w", err)
-	}
-	opts := make([]StatusOption, len(statuses))
-	for i, st := range statuses {
-		opts[i] = StatusOption{
-			Name:  st.Status,
-			Color: st.Color,
-			Type:  st.Type,
+	v, err, _ := s.group.Do(sfKey, func() (any, error) {
+		statuses, err := s.api.ListStatuses(ctx, listID)
+		if err != nil {
+			return nil, fmt.Errorf("load list statuses: %w", err)
 		}
+		opts := make([]StatusOption, len(statuses))
+		for i, st := range statuses {
+			opts[i] = StatusOption{
+				Name:  st.Status,
+				Color: st.Color,
+				Type:  st.Type,
+			}
+		}
+
+		s.mu.Lock()
+		s.statusCache[listID] = opts
+		s.mu.Unlock()
+
+		return opts, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	s.mu.Lock()
-	s.statusCache[listID] = opts
-	s.mu.Unlock()
-
-	return opts, nil
+	return v.([]StatusOption), nil
 }
 
 // UpdateTaskStatus sets a task's status to the given value and returns the
@@ -183,7 +214,8 @@ func (s *TaskService) LoadListStatuses(ctx context.Context, listID string) ([]St
 //
 // On success the task detail cache for taskID is replaced with the fresh
 // result and all task list cache entries are evicted (since we don't track
-// which list contains the task).
+// which list contains the task).  In-flight singleflight requests for the
+// affected keys are also forgotten so subsequent loads hit the API.
 func (s *TaskService) UpdateTaskStatus(ctx context.Context, taskID, status string) (*TaskDetail, error) {
 	t, err := s.api.UpdateTaskStatus(ctx, taskID, status)
 	if err != nil {
@@ -192,33 +224,55 @@ func (s *TaskService) UpdateTaskStatus(ctx context.Context, taskID, status strin
 	detail := taskToDetail(t)
 
 	s.mu.Lock()
+	// Collect list-cache keys before clearing so we can forget their
+	// singleflight entries outside the lock.
+	listKeys := make([]string, 0, len(s.taskListCache))
+	for key := range s.taskListCache {
+		listKeys = append(listKeys, key)
+	}
 	delete(s.taskDetailCache, taskID)
 	clear(s.taskListCache)
 	s.taskDetailCache[taskID] = detail
 	s.mu.Unlock()
 
+	// Forget singleflight keys so any in-flight fetch is discarded.
+	s.group.Forget("detail:" + taskID)
+	for _, key := range listKeys {
+		s.group.Forget("tasks:" + key)
+	}
+
 	return detail, nil
 }
 
 // InvalidateTaskList evicts all cached task list pages for listID so the next
-// LoadTasks call fetches fresh data from the API.
+// LoadTasks call fetches fresh data from the API.  Any in-flight singleflight
+// requests for those pages are also forgotten.
 func (s *TaskService) InvalidateTaskList(listID string) {
 	prefix := listID + ":"
+	var forgotKeys []string
 	s.mu.Lock()
 	for key := range s.taskListCache {
 		if strings.HasPrefix(key, prefix) {
 			delete(s.taskListCache, key)
+			forgotKeys = append(forgotKeys, key)
 		}
 	}
 	s.mu.Unlock()
+
+	for _, key := range forgotKeys {
+		s.group.Forget("tasks:" + key)
+	}
 }
 
 // InvalidateTaskDetail evicts the cached task detail for taskID so the next
-// LoadTaskDetail call fetches fresh data from the API.
+// LoadTaskDetail call fetches fresh data from the API.  Any in-flight
+// singleflight request for this taskID is also forgotten.
 func (s *TaskService) InvalidateTaskDetail(taskID string) {
 	s.mu.Lock()
 	delete(s.taskDetailCache, taskID)
 	s.mu.Unlock()
+
+	s.group.Forget("detail:" + taskID)
 }
 
 func taskToDetail(t *clickup.Task) *TaskDetail {

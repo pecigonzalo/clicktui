@@ -3,6 +3,8 @@ package app_test
 import (
 	"context"
 	"errors"
+	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -716,4 +718,241 @@ func TestTaskService_InvalidateTaskList_CausesAPIMiss(t *testing.T) {
 	_, err = svc.LoadTasks(ctx, "l1", 1)
 	require.NoError(t, err)
 	assert.Equal(t, int64(4), api.tasksCalls.Load(), "page 1 should be evicted")
+}
+
+// --- Singleflight tests ---
+
+// blockingCountingAPI wraps countingAPI and blocks API calls on a channel so
+// tests can control when responses are delivered.  Each gated method also
+// signals an entered channel (via close-once) when a goroutine arrives at the
+// gate, letting the test synchronize.
+type blockingCountingAPI struct {
+	*countingAPI
+	taskGate            chan struct{}
+	taskEntered         chan struct{} // closed when first Task() call arrives
+	tasksGate           chan struct{}
+	tasksEntered        chan struct{}
+	listStatusesGate    chan struct{}
+	listStatusesEntered chan struct{}
+}
+
+func newBlockingCountingAPI() *blockingCountingAPI {
+	return &blockingCountingAPI{countingAPI: newCountingAPI()}
+}
+
+func signalOnce(ch chan struct{}) {
+	select {
+	case <-ch:
+		// already closed
+	default:
+		close(ch)
+	}
+}
+
+func (b *blockingCountingAPI) Task(ctx context.Context, taskID string) (*clickup.Task, error) {
+	if b.taskGate != nil {
+		if b.taskEntered != nil {
+			signalOnce(b.taskEntered)
+		}
+		<-b.taskGate
+	}
+	return b.countingAPI.Task(ctx, taskID)
+}
+
+func (b *blockingCountingAPI) Tasks(ctx context.Context, listID string, page int) ([]clickup.Task, error) {
+	if b.tasksGate != nil {
+		if b.tasksEntered != nil {
+			signalOnce(b.tasksEntered)
+		}
+		<-b.tasksGate
+	}
+	return b.countingAPI.Tasks(ctx, listID, page)
+}
+
+func (b *blockingCountingAPI) ListStatuses(ctx context.Context, listID string) ([]clickup.Status, error) {
+	if b.listStatusesGate != nil {
+		if b.listStatusesEntered != nil {
+			signalOnce(b.listStatusesEntered)
+		}
+		<-b.listStatusesGate
+	}
+	return b.countingAPI.ListStatuses(ctx, listID)
+}
+
+func TestTaskService_Singleflight_DeduplicatesConcurrentDetailLoads(t *testing.T) {
+	api := newBlockingCountingAPI()
+	api.taskGate = make(chan struct{})
+	api.taskEntered = make(chan struct{})
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Fix login",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l1"},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// Use a start barrier to ensure all goroutines begin LoadTaskDetail at
+	// approximately the same time, maximising the chance they all enter
+	// group.Do before the leader completes.
+	const goroutines = 10
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	results := make([]*app.TaskDetail, goroutines)
+	errs := make([]error, goroutines)
+
+	for i := range goroutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			results[idx], errs[idx] = svc.LoadTaskDetail(ctx, "t1")
+		}(i)
+	}
+
+	// Release all goroutines at once.
+	close(start)
+
+	// Wait until the leader goroutine is inside the API call (blocked on gate).
+	<-api.taskEntered
+
+	// Give other goroutines time to queue up behind singleflight.
+	runtime.Gosched()
+
+	// Release the gate — only one API call should proceed.
+	close(api.taskGate)
+	wg.Wait()
+
+	for i := range goroutines {
+		require.NoError(t, errs[i], "goroutine %d", i)
+		assert.Equal(t, "t1", results[i].ID, "goroutine %d", i)
+	}
+
+	// Singleflight deduplicates: at most a small number of API calls
+	// (ideally 1, but timing may allow 2 if a goroutine races past the
+	// cache check after the leader populates it).
+	calls := api.taskCalls.Load()
+	assert.LessOrEqual(t, calls, int64(2),
+		"concurrent loads should be deduplicated (got %d API calls for %d goroutines)", calls, goroutines)
+}
+
+func TestTaskService_Singleflight_DeduplicatesConcurrentTasksLoads(t *testing.T) {
+	api := newBlockingCountingAPI()
+	api.tasksGate = make(chan struct{})
+	api.tasksEntered = make(chan struct{})
+	api.tasks["l1"] = []clickup.Task{
+		{ID: "t1", Name: "Task 1", Status: clickup.Status{Status: "open"}},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	const goroutines = 10
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+
+	for i := range goroutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			_, errs[idx] = svc.LoadTasks(ctx, "l1", 0)
+		}(i)
+	}
+
+	close(start)
+	<-api.tasksEntered
+	runtime.Gosched()
+	close(api.tasksGate)
+	wg.Wait()
+
+	for i := range goroutines {
+		require.NoError(t, errs[i], "goroutine %d", i)
+	}
+
+	calls := api.tasksCalls.Load()
+	assert.LessOrEqual(t, calls, int64(2),
+		"concurrent LoadTasks should be deduplicated (got %d API calls for %d goroutines)", calls, goroutines)
+}
+
+func TestTaskService_Singleflight_DeduplicatesConcurrentStatusLoads(t *testing.T) {
+	api := newBlockingCountingAPI()
+	api.listStatusesGate = make(chan struct{})
+	api.listStatusesEntered = make(chan struct{})
+	api.statusesByListID["l1"] = []clickup.Status{
+		{Status: "open", Color: "#ccc", Type: "open"},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	const goroutines = 10
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+
+	for i := range goroutines {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			_, errs[idx] = svc.LoadListStatuses(ctx, "l1")
+		}(i)
+	}
+
+	close(start)
+	<-api.listStatusesEntered
+	runtime.Gosched()
+	close(api.listStatusesGate)
+	wg.Wait()
+
+	for i := range goroutines {
+		require.NoError(t, errs[i], "goroutine %d", i)
+	}
+
+	calls := api.listStatusesCalls.Load()
+	assert.LessOrEqual(t, calls, int64(2),
+		"concurrent LoadListStatuses should be deduplicated (got %d API calls for %d goroutines)", calls, goroutines)
+}
+
+func TestTaskService_Singleflight_InvalidateForgetsCausesRefresh(t *testing.T) {
+	// After invalidation + forget, the next load must reach the API even if a
+	// previous singleflight result was cached.
+	api := newCountingAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Original",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l1"},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// Prime the cache.
+	d1, err := svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, "Original", d1.Name)
+	assert.Equal(t, int64(1), api.taskCalls.Load())
+
+	// Simulate server-side change.
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Updated",
+		Status: clickup.Status{Status: "in progress"},
+		List:   clickup.TaskRef{ID: "l1"},
+	}
+
+	// Invalidate — evicts cache and forgets the singleflight key.
+	svc.InvalidateTaskDetail("t1")
+
+	// The next load must hit the API and return the updated data.
+	d2, err := svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, "Updated", d2.Name)
+	assert.Equal(t, "in progress", d2.Status)
+	assert.Equal(t, int64(2), api.taskCalls.Load(),
+		"after invalidation the API must be called again")
 }
