@@ -2,6 +2,8 @@
 
 A vibecoded terminal UI and CLI for ClickUp.
 
+_Vibes will f it up, but can it f it up more than ClickUp Web?_
+
 ## Requirements
 
 - Go 1.25+
