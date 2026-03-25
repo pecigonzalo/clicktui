@@ -239,6 +239,14 @@ func (tlp *TaskListPane) onSelected(row, _ int) {
 
 func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 	switch {
+	case event.Key() == tcell.KeyRune && event.Rune() == 'c':
+		// Initiate task creation flow for the current list.
+		if tlp.currentID == "" {
+			tlp.tuiApp.setError("select a list first")
+			return nil
+		}
+		tlp.startCreateFlow()
+		return nil
 	case event.Key() == tcell.KeyRune && event.Rune() == 's':
 		// Trigger status picker for the currently selected task.
 		row, _ := tlp.GetSelection()
@@ -273,6 +281,240 @@ func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 	}
 	return event
 }
+
+// ── Task creation flow ───────────────────────────────────────────────────────
+
+// startCreateFlow initiates the sequential task creation wizard.
+// Step 1: prompt for task name (required).
+// Step 2: prompt for status selection.
+// Step 3: prompt for priority (optional; "skip" option available).
+// Must be called from the UI goroutine.
+func (tlp *TaskListPane) startCreateFlow() {
+	listID := tlp.currentID
+
+	ShowInputModal(tlp.tuiApp, InputModalConfig{
+		Title:       "New Task Name",
+		Placeholder: "Enter task name…",
+		Validate: func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return errTaskNameRequired
+			}
+			return nil
+		},
+		OnSubmit: func(name string) {
+			tlp.createFlowPickStatus(listID, strings.TrimSpace(name))
+		},
+		OnCancel: func() {
+			tlp.tuiApp.footer.SetStatusReady("Create cancelled")
+		},
+	})
+}
+
+// createFlowPickStatus loads list statuses and shows the status picker.
+// Called after the task name has been entered.
+func (tlp *TaskListPane) createFlowPickStatus(listID, name string) {
+	tlp.tuiApp.setStatusLoading("Loading statuses…")
+
+	go func() {
+		statuses, err := tlp.tuiApp.tasks.LoadListStatuses(tlp.tuiApp.ctx, listID)
+		tlp.tuiApp.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				tlp.tuiApp.logger.Error("create task: load statuses", "list", listID, "error", err)
+				tlp.tuiApp.setError("load statuses: %v", err)
+				return
+			}
+			if len(statuses) == 0 {
+				tlp.tuiApp.setError("no statuses available for this list")
+				return
+			}
+			tlp.tuiApp.footer.SetStatusReady("")
+			tlp.createFlowShowStatusModal(listID, name, statuses)
+		})
+	}()
+}
+
+// createFlowShowStatusModal presents the status selection modal.
+// Must be called from the UI goroutine.
+func (tlp *TaskListPane) createFlowShowStatusModal(listID, name string, statuses []app.StatusOption) {
+	opts := make([]SelectOption, len(statuses))
+	for i, s := range statuses {
+		opts[i] = SelectOption{
+			Label: s.Name,
+			Value: s.Name,
+		}
+	}
+
+	ShowSelectModal(tlp.tuiApp, SelectModalConfig{
+		Title:   "Select Status",
+		Options: opts,
+		OnSubmit: func(selected []string) {
+			if len(selected) == 0 {
+				tlp.tuiApp.footer.SetStatusReady("Create cancelled")
+				return
+			}
+			tlp.createFlowPickPriority(listID, name, selected[0])
+		},
+		OnCancel: func() {
+			tlp.tuiApp.footer.SetStatusReady("Create cancelled")
+		},
+	})
+}
+
+// priorityOptions lists the ClickUp priority choices for the creation flow.
+// "none" maps to priority int 0 (omitted by the API).
+var priorityOptions = []SelectOption{
+	{Label: "Skip (no priority)", Value: "0"},
+	{Label: "Urgent", Value: "1"},
+	{Label: "High", Value: "2"},
+	{Label: "Normal", Value: "3"},
+	{Label: "Low", Value: "4"},
+}
+
+// createFlowPickPriority shows an optional priority picker.
+// Selecting "Skip" creates the task immediately with no priority.
+func (tlp *TaskListPane) createFlowPickPriority(listID, name, status string) {
+	ShowSelectModal(tlp.tuiApp, SelectModalConfig{
+		Title:   "Select Priority (optional)",
+		Options: priorityOptions,
+		OnSubmit: func(selected []string) {
+			priority := 0
+			if len(selected) > 0 {
+				switch selected[0] {
+				case "1":
+					priority = 1
+				case "2":
+					priority = 2
+				case "3":
+					priority = 3
+				case "4":
+					priority = 4
+				}
+			}
+			tlp.executeCreate(listID, app.CreateTaskInput{
+				Name:     name,
+				Status:   status,
+				Priority: priority,
+			})
+		},
+		OnCancel: func() {
+			// Cancel from priority picker still creates with name+status only.
+			tlp.executeCreate(listID, app.CreateTaskInput{
+				Name:   name,
+				Status: status,
+			})
+		},
+	})
+}
+
+// executeCreate calls the service to create the task, then reloads the list.
+// Must be called from the UI goroutine.
+func (tlp *TaskListPane) executeCreate(listID string, input app.CreateTaskInput) {
+	tlp.tuiApp.setStatusLoading("Creating task %q…", input.Name)
+
+	go func() {
+		newID, err := tlp.tuiApp.tasks.CreateTask(tlp.tuiApp.ctx, listID, input)
+		tlp.tuiApp.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				tlp.tuiApp.logger.Error("create task", "list", listID, "error", err)
+				tlp.tuiApp.setError("create task: %v", err)
+				return
+			}
+			taskName := input.Name
+
+			// Invalidate list cache (CreateTask already does this, but be explicit
+			// here so the reload always fetches fresh data).
+			tlp.tuiApp.tasks.InvalidateTaskList(listID)
+			tlp.allTasks = nil
+			tlp.tasks = nil
+			tlp.page = 0
+
+			// Reload and, once done, try to select the new task.
+			tlp.loadTasksAndSelect(listID, tlp.listName, newID, taskName)
+		})
+	}()
+}
+
+// loadTasksAndSelect reloads the task list and tries to select the task with
+// targetID once loading completes. If the active filter hides the new task,
+// a footer message is shown. Must be called from the UI goroutine.
+func (tlp *TaskListPane) loadTasksAndSelect(listID, listName, targetID, taskName string) {
+	tlp.currentID = listID
+	tlp.listName = listName
+	tlp.page = 0
+	tlp.restoreSortPreference()
+	tlp.loadStatusOrder(listID)
+	// Use a wrapped fetch that selects the new task when loading completes.
+	tlp.fetchPageThenSelect(targetID, taskName)
+}
+
+// fetchPageThenSelect fetches all pages (like fetchPage) and, when loading
+// finishes, selects the task identified by targetID.
+func (tlp *TaskListPane) fetchPageThenSelect(targetID, taskName string) {
+	if tlp.isLoading {
+		return
+	}
+	tlp.isLoading = true
+	tlp.tuiApp.setStatusLoading("Loading tasks for %s (page %d)…", tlp.listName, tlp.page)
+
+	go func() {
+		tasks, err := tlp.tuiApp.tasks.LoadTasks(tlp.tuiApp.ctx, tlp.currentID, tlp.page)
+		tlp.tuiApp.tviewApp.QueueUpdateDraw(func() {
+			tlp.isLoading = false
+			if err != nil {
+				tlp.tuiApp.logger.Error("load tasks after create", "list", tlp.currentID, "error", err)
+				tlp.tuiApp.setError("load tasks: %v", err)
+				tlp.showEmpty(fmt.Sprintf("Error loading tasks: %v", err))
+				return
+			}
+			if tlp.page == 0 {
+				tlp.allTasks = tasks
+			} else {
+				tlp.allTasks = append(tlp.allTasks, tasks...)
+			}
+
+			if len(tasks) == 100 {
+				// More pages — keep paginating, carry targetID through.
+				tlp.page++
+				tlp.isLoading = false
+				tlp.fetchPageThenSelect(targetID, taskName)
+				return
+			}
+
+			// All pages loaded — reapply filter+sort and select the new task.
+			tlp.reapplyFilter()
+
+			// Try to select the newly created task.
+			found := tlp.selectTaskByID(targetID)
+			if found {
+				tlp.tuiApp.footer.SetStatusReady(fmt.Sprintf("Task created: %s", taskName))
+			} else if tlp.activeQuery != nil {
+				// Task exists but active filter is hiding it.
+				tlp.tuiApp.footer.SetStatusReady(fmt.Sprintf("Task created (hidden by filter): %s", taskName))
+			} else {
+				tlp.tuiApp.footer.SetStatusReady(fmt.Sprintf("Task created: %s", taskName))
+			}
+		})
+	}()
+}
+
+// selectTaskByID attempts to highlight the row for the given task ID.
+// Returns true when the ID was found in the current visible task set.
+func (tlp *TaskListPane) selectTaskByID(taskID string) bool {
+	if taskID == "" {
+		return false
+	}
+	for i, t := range tlp.tasks {
+		if t.ID == taskID {
+			tlp.Select(i+1, 0) // +1 for the header row
+			return true
+		}
+	}
+	return false
+}
+
+// errTaskNameRequired is returned by the name-field validator when the user
+// tries to submit an empty task name.
+var errTaskNameRequired = fmt.Errorf("task name is required")
 
 // refreshCurrentTask updates the status column for a task in the list without
 // a full reload.  Must be called from the UI goroutine.
