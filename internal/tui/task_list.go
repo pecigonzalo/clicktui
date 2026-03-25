@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -10,11 +11,17 @@ import (
 	"github.com/pecigonzalo/clicktui/internal/app"
 )
 
+// Sort direction arrows for the pane title indicator.
+const (
+	sortArrowAsc  = "↑"
+	sortArrowDesc = "↓"
+)
+
 // TaskListPane displays tasks for a selected list in a table.
 type TaskListPane struct {
 	*tview.Table
 	tuiApp      *App
-	tasks       []app.TaskSummary // currently displayed tasks (may be filtered)
+	tasks       []app.TaskSummary // currently displayed tasks (may be filtered+sorted)
 	allTasks    []app.TaskSummary // unfiltered full task set for the current list
 	activeQuery *app.TaskQuery    // non-nil when a filter is active
 	currentID   string
@@ -22,6 +29,11 @@ type TaskListPane struct {
 	page        int
 	isLoading   bool
 	styler      *PaneStyler // set by app.go after construction
+
+	// Sort state.
+	sortField   string         // current sort field ("" = no sort)
+	sortAsc     bool           // sort direction
+	statusOrder map[string]int // status name → position; populated from list statuses
 }
 
 // NewTaskListPane creates an empty task list table.
@@ -54,6 +66,8 @@ func (tlp *TaskListPane) LoadTasks(listID, listName string) {
 	tlp.currentID = listID
 	tlp.listName = listName
 	tlp.page = 0
+	tlp.restoreSortPreference()
+	tlp.loadStatusOrder(listID)
 	tlp.fetchPage()
 }
 
@@ -118,14 +132,18 @@ func (tlp *TaskListPane) render() {
 	tlp.Clear()
 
 	// Update the pane title via styler so focus state is preserved.
-	// Format: "ListName  #ListID  N tasks"
+	// Format: "ListName  #ListID  N tasks  ↑field" (sort indicator when active)
 	if tlp.styler != nil {
-		tlp.styler.title = fmt.Sprintf("%s  %s#%s  %d tasks[-]",
+		title := fmt.Sprintf("%s  %s#%s  %d tasks[-]",
 			tview.Escape(tlp.listName),
 			tagColor(ColorTextMuted),
 			tlp.currentID,
 			len(tlp.tasks),
 		)
+		if ind := tlp.sortIndicator(); ind != "" {
+			title += "  " + tagColor(ColorFilterAccent) + ind + "[-]"
+		}
+		tlp.styler.title = title
 		tlp.styler.reapply()
 	}
 
@@ -183,6 +201,25 @@ func (tlp *TaskListPane) render() {
 	}
 }
 
+// restoreSelectionByID attempts to select the row for the task with the given
+// ID after a re-sort or re-filter. If the ID is not found (or empty), falls
+// back to selecting the first data row.
+func (tlp *TaskListPane) restoreSelectionByID(taskID string) {
+	if taskID == "" {
+		return
+	}
+	for i, t := range tlp.tasks {
+		if t.ID == taskID {
+			tlp.Select(i+1, 0) // +1 for header row
+			return
+		}
+	}
+	// ID not in current visible set — stay on first row.
+	if len(tlp.tasks) > 0 {
+		tlp.Select(1, 0)
+	}
+}
+
 func (tlp *TaskListPane) showEmpty(msg string) {
 	tlp.Clear()
 	tlp.SetCell(0, 0, tview.NewTableCell(emptyText(msg)).
@@ -212,6 +249,18 @@ func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 			// once the detail finishes loading.
 			tlp.tuiApp.setFocusPane(paneTaskDetail)
 		}
+		return nil
+	case event.Key() == tcell.KeyRune && event.Rune() == 'S':
+		// Cycle sort field: none → status → priority → due_date → assignee → name → none.
+		prevID := tlp.SelectedTaskID()
+		tlp.cycleSortField()
+		tlp.restoreSelectionByID(prevID)
+		return nil
+	case event.Key() == tcell.KeyRune && event.Rune() == 'T':
+		// Toggle sort direction (ascending ↔ descending).
+		prevID := tlp.SelectedTaskID()
+		tlp.toggleSortDirection()
+		tlp.restoreSelectionByID(prevID)
 		return nil
 	case event.Key() == tcell.KeyRune && event.Rune() == 'r':
 		if tlp.currentID != "" {
@@ -279,6 +328,7 @@ func (tlp *TaskListPane) ApplyFilter(filtered []app.TaskSummary, query app.TaskQ
 			tlp.tasks = filtered
 		}
 	}
+	tlp.applySortToTasks()
 	tlp.render()
 }
 
@@ -287,12 +337,14 @@ func (tlp *TaskListPane) ApplyFilter(filtered []app.TaskSummary, query app.TaskQ
 func (tlp *TaskListPane) ClearFilter() {
 	tlp.activeQuery = nil
 	tlp.tasks = tlp.allTasks
+	tlp.applySortToTasks()
 	tlp.render()
 }
 
-// reapplyFilter applies the active filter query to allTasks and re-renders.
-// When no filter is active, it shows all tasks. Must be called from the UI
-// goroutine.
+// reapplyFilter applies the active filter query to allTasks, then sorts, and
+// re-renders. When no filter is active, it shows all tasks.
+// Flow: allTasks → filter → sort → render.
+// Must be called from the UI goroutine.
 func (tlp *TaskListPane) reapplyFilter() {
 	if tlp.activeQuery == nil {
 		tlp.tasks = tlp.allTasks
@@ -305,5 +357,96 @@ func (tlp *TaskListPane) reapplyFilter() {
 			tlp.tasks = filtered
 		}
 	}
+	tlp.applySortToTasks()
 	tlp.render()
+}
+
+// applySortToTasks sorts tlp.tasks in place using the current sort preferences.
+// No-op when sortField is empty or tasks is nil/empty.
+func (tlp *TaskListPane) applySortToTasks() {
+	if tlp.sortField == "" || len(tlp.tasks) == 0 {
+		return
+	}
+	tlp.tasks = app.SortTasks(tlp.tasks, tlp.sortField, tlp.sortAsc, tlp.statusOrder)
+}
+
+// sortIndicator returns the sort indicator string for the pane title.
+// Returns "" when no sort is active.
+func (tlp *TaskListPane) sortIndicator() string {
+	if tlp.sortField == "" {
+		return ""
+	}
+	arrow := sortArrowAsc
+	if !tlp.sortAsc {
+		arrow = sortArrowDesc
+	}
+	return arrow + tlp.sortField
+}
+
+// cycleSortField advances to the next sort field, persists the preference,
+// and re-renders the task list. Must be called from the UI goroutine.
+func (tlp *TaskListPane) cycleSortField() {
+	tlp.sortField = app.NextSortField(tlp.sortField)
+	// Default to ascending when a new field is selected.
+	if tlp.sortField != "" {
+		tlp.sortAsc = true
+	}
+	tlp.persistSort()
+	tlp.reapplyFilter()
+}
+
+// toggleSortDirection flips the sort direction and re-renders. If no sort
+// field is active, this is a no-op. Must be called from the UI goroutine.
+func (tlp *TaskListPane) toggleSortDirection() {
+	if tlp.sortField == "" {
+		return
+	}
+	tlp.sortAsc = !tlp.sortAsc
+	tlp.persistSort()
+	tlp.reapplyFilter()
+}
+
+// persistSort saves the current sort preference to the UI state service.
+func (tlp *TaskListPane) persistSort() {
+	if tlp.tuiApp == nil || tlp.tuiApp.uiState == nil {
+		return
+	}
+	if err := tlp.tuiApp.uiState.SetSortPreference(tlp.tuiApp.profile, tlp.sortField, tlp.sortAsc); err != nil {
+		tlp.tuiApp.logger.Error("persist sort preference", "error", err)
+	}
+}
+
+// restoreSortPreference loads the saved sort preference from the UI state
+// service into the pane's sort fields. Must be called from the UI goroutine.
+func (tlp *TaskListPane) restoreSortPreference() {
+	if tlp.tuiApp == nil || tlp.tuiApp.uiState == nil {
+		return
+	}
+	tlp.sortField, tlp.sortAsc = tlp.tuiApp.uiState.GetSortPreference(tlp.tuiApp.profile)
+}
+
+// loadStatusOrder fetches list statuses and builds the statusOrder map for
+// sort-by-status. Runs in a background goroutine to avoid blocking the UI.
+func (tlp *TaskListPane) loadStatusOrder(listID string) {
+	if tlp.tuiApp == nil {
+		return
+	}
+	go func() {
+		statuses, err := tlp.tuiApp.tasks.LoadListStatuses(tlp.tuiApp.ctx, listID)
+		if err != nil {
+			tlp.tuiApp.logger.Error("load list statuses for sort", "list", listID, "error", err)
+			return
+		}
+		tlp.tuiApp.tviewApp.QueueUpdateDraw(func() {
+			order := make(map[string]int, len(statuses))
+			for i, s := range statuses {
+				order[strings.ToLower(s.Name)] = i
+			}
+			tlp.statusOrder = order
+			// Re-sort if currently sorting by status, now that we have the order.
+			if tlp.sortField == app.SortFieldStatus {
+				tlp.reapplyFilter()
+			}
+		})
+	}()
 }

@@ -299,3 +299,211 @@ func taskIDs(tasks []app.TaskSummary) []string {
 	}
 	return ids
 }
+
+// sortableTasks returns tasks with PriorityOrder set for sorting tests.
+func sortableTasks() []app.TaskSummary {
+	return []app.TaskSummary{
+		{ID: "t1", Name: "Fix login bug", Status: "in progress", Priority: "high", PriorityOrder: 2, Parent: ""},
+		{ID: "t2", Name: "Add dark mode", Status: "todo", Priority: "normal", PriorityOrder: 3, Parent: ""},
+		{ID: "t3", Name: "Write tests", Status: "in progress", Priority: "urgent", PriorityOrder: 1, Parent: ""},
+		{ID: "t4", Name: "Update docs", Status: "done", Priority: "low", PriorityOrder: 4, Parent: "t1"},
+		{ID: "t5", Name: "Deploy to staging", Status: "todo", Priority: "high", PriorityOrder: 2, Parent: ""},
+	}
+}
+
+// ── Sort integration tests ──────────────────────────────────────────────────
+
+func TestApplySortToTasks_NoSort(t *testing.T) {
+	tlp := newTestTaskListPane()
+	tasks := sortableTasks()
+	tlp.tasks = make([]app.TaskSummary, len(tasks))
+	copy(tlp.tasks, tasks)
+	tlp.sortField = ""
+
+	tlp.applySortToTasks()
+
+	// No sort — order should be unchanged.
+	got := taskIDs(tlp.tasks)
+	want := taskIDs(tasks)
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("applySortToTasks(no sort): tasks[%d].ID = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestApplySortToTasks_ByPriority(t *testing.T) {
+	tlp := newTestTaskListPane()
+	tasks := sortableTasks()
+	tlp.tasks = make([]app.TaskSummary, len(tasks))
+	copy(tlp.tasks, tasks)
+	tlp.sortField = app.SortFieldPriority
+	tlp.sortAsc = true
+
+	tlp.applySortToTasks()
+
+	// Ascending priority: urgent(1) < high(2) < normal(3) < low(4).
+	// t3(urgent) is a top-level, t1(high) has child t4(low), t5(high), t2(normal).
+	// Groups: [t3], [t1,t4], [t5], [t2].
+	// Sorted ascending: t3(1), t1(2)+t4, t5(2), t2(3).
+	got := taskIDs(tlp.tasks)
+	if got[0] != "t3" {
+		t.Errorf("applySortToTasks(priority asc): first task = %q, want t3 (urgent)", got[0])
+	}
+	// t4 should be right after its parent t1.
+	for i, id := range got {
+		if id == "t1" && i+1 < len(got) && got[i+1] != "t4" {
+			t.Errorf("applySortToTasks(priority asc): t4 should follow t1, got %v", got)
+		}
+	}
+}
+
+func TestApplySortToTasks_NilTasks(t *testing.T) {
+	tlp := newTestTaskListPane()
+	tlp.tasks = nil
+	tlp.sortField = app.SortFieldName
+	tlp.sortAsc = true
+
+	// Should not panic.
+	tlp.applySortToTasks()
+
+	if tlp.tasks != nil {
+		t.Errorf("applySortToTasks(nil tasks): expected nil, got %d items", len(tlp.tasks))
+	}
+}
+
+func TestSortIndicator(t *testing.T) {
+	cases := []struct {
+		name      string
+		sortField string
+		sortAsc   bool
+		want      string
+	}{
+		{"no_sort", "", true, ""},
+		{"ascending_priority", app.SortFieldPriority, true, "↑priority"},
+		{"descending_name", app.SortFieldName, false, "↓name"},
+		{"ascending_status", app.SortFieldStatus, true, "↑status"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tlp := newTestTaskListPane()
+			tlp.sortField = tc.sortField
+			tlp.sortAsc = tc.sortAsc
+			got := tlp.sortIndicator()
+			if got != tc.want {
+				t.Errorf("sortIndicator() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCycleSortField_NoApp(t *testing.T) {
+	// cycleSortField without a wired App should not panic (just no persistence).
+	tlp := newTestTaskListPane()
+	tlp.allTasks = sortableTasks()
+	tlp.tasks = make([]app.TaskSummary, len(tlp.allTasks))
+	copy(tlp.tasks, tlp.allTasks)
+	tlp.sortField = ""
+
+	// First cycle: none → status.
+	tlp.cycleSortField()
+
+	if tlp.sortField != app.SortFieldStatus {
+		t.Errorf("cycleSortField: sortField = %q, want %q", tlp.sortField, app.SortFieldStatus)
+	}
+	if !tlp.sortAsc {
+		t.Error("cycleSortField: sortAsc should be true after cycling to new field")
+	}
+}
+
+func TestToggleSortDirection_NoApp(t *testing.T) {
+	tlp := newTestTaskListPane()
+	tlp.allTasks = sortableTasks()
+	tlp.tasks = make([]app.TaskSummary, len(tlp.allTasks))
+	copy(tlp.tasks, tlp.allTasks)
+	tlp.sortField = app.SortFieldPriority
+	tlp.sortAsc = true
+
+	tlp.toggleSortDirection()
+
+	if tlp.sortAsc {
+		t.Error("toggleSortDirection: sortAsc should be false after toggle")
+	}
+}
+
+func TestToggleSortDirection_NoOp_WhenNoSort(t *testing.T) {
+	tlp := newTestTaskListPane()
+	tlp.sortField = ""
+	tlp.sortAsc = false
+
+	tlp.toggleSortDirection()
+
+	// No sort field — direction should stay unchanged.
+	if tlp.sortAsc {
+		t.Error("toggleSortDirection: should be no-op when sortField is empty")
+	}
+}
+
+func TestReapplyFilter_WithSort(t *testing.T) {
+	tlp := newTestTaskListPane()
+	tasks := sortableTasks()
+	tlp.allTasks = make([]app.TaskSummary, len(tasks))
+	copy(tlp.allTasks, tasks)
+	tlp.sortField = app.SortFieldName
+	tlp.sortAsc = true
+
+	tlp.reapplyFilter()
+
+	// With sort by name ascending, first task should be alphabetically first.
+	// Groups (top-level): t2("Add dark mode"), t5("Deploy to staging"),
+	// t1("Fix login bug")+t4, t3("Write tests").
+	got := taskIDs(tlp.tasks)
+	if got[0] != "t2" {
+		t.Errorf("reapplyFilter+sort(name asc): first = %q, want t2 ('Add dark mode')", got[0])
+	}
+}
+
+func TestRestoreSelectionByID_Found(t *testing.T) {
+	tlp := newTestTaskListPane()
+	tlp.tasks = sortableTasks()
+	tlp.render()
+
+	tlp.restoreSelectionByID("t3")
+
+	row, _ := tlp.GetSelection()
+	// t3 is at index 2 (0-indexed), so row = 3 (1-indexed + header).
+	if row != 3 {
+		t.Errorf("restoreSelectionByID('t3'): selected row = %d, want 3", row)
+	}
+}
+
+func TestRestoreSelectionByID_NotFound(t *testing.T) {
+	tlp := newTestTaskListPane()
+	tlp.tasks = sortableTasks()
+	tlp.render()
+	// Select row 4 before restore.
+	tlp.Select(4, 0)
+
+	tlp.restoreSelectionByID("nonexistent")
+
+	// Should fall back to row 1 (first data row).
+	row, _ := tlp.GetSelection()
+	if row != 1 {
+		t.Errorf("restoreSelectionByID(nonexistent): selected row = %d, want 1", row)
+	}
+}
+
+func TestRestoreSelectionByID_Empty(t *testing.T) {
+	tlp := newTestTaskListPane()
+	tlp.tasks = sortableTasks()
+	tlp.render()
+	tlp.Select(3, 0)
+
+	// Empty ID — should be a no-op (selection stays where it is).
+	tlp.restoreSelectionByID("")
+
+	row, _ := tlp.GetSelection()
+	if row != 3 {
+		t.Errorf("restoreSelectionByID(''): selected row = %d, want 3 (unchanged)", row)
+	}
+}

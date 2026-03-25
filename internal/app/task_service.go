@@ -22,6 +22,10 @@ type TaskSummary struct {
 	StatusColor string // hex color from the API, e.g. "#ff6b6b"; empty when absent
 	Priority    string
 	Parent      string // parent task ID, empty for top-level tasks
+	// Sort-friendly fields below; not rendered directly but used for ordering.
+	DueDate       string // ISO date (YYYY-MM-DD) or empty; sortable as string
+	Assignee      string // first assignee username or empty
+	PriorityOrder int    // 1=urgent, 2=high, 3=normal, 4=low, 0=none (sorts last)
 }
 
 // SubtaskSummary is a lightweight summary of a subtask for the detail view.
@@ -116,12 +120,15 @@ func (s *TaskService) LoadTasks(ctx context.Context, listID string, page int) ([
 		summaries := make([]TaskSummary, len(tasks))
 		for i, t := range tasks {
 			summaries[i] = TaskSummary{
-				ID:          t.ID,
-				Name:        t.Name,
-				Status:      t.Status.Status,
-				StatusColor: t.Status.Color,
-				Priority:    priorityName(t.Priority),
-				Parent:      t.Parent,
+				ID:            t.ID,
+				Name:          t.Name,
+				Status:        t.Status.Status,
+				StatusColor:   t.Status.Color,
+				Priority:      priorityName(t.Priority),
+				Parent:        t.Parent,
+				DueDate:       formatEpochMillis(t.DueDate),
+				Assignee:      firstAssignee(t.Assignees),
+				PriorityOrder: priorityOrder(t.Priority),
 			}
 		}
 		result := orderByParent(summaries)
@@ -442,6 +449,36 @@ func priorityName(p *clickup.Priority) string {
 		return "none"
 	}
 	return p.Name
+}
+
+// priorityOrder maps a ClickUp priority to a sort-friendly integer.
+// ClickUp uses 1=urgent, 2=high, 3=normal, 4=low; nil means none.
+// We keep 1-4 as-is and map none to 5 so it sorts last.
+func priorityOrder(p *clickup.Priority) int {
+	if p == nil || p.ID == "" || p.ID == "0" {
+		return 5 // none sorts last
+	}
+	switch p.ID {
+	case "1":
+		return 1 // urgent
+	case "2":
+		return 2 // high
+	case "3":
+		return 3 // normal
+	case "4":
+		return 4 // low
+	default:
+		return 5
+	}
+}
+
+// firstAssignee returns the username of the first assignee, or "" when
+// there are no assignees.
+func firstAssignee(assignees []clickup.Assignee) string {
+	if len(assignees) == 0 {
+		return ""
+	}
+	return assignees[0].Username
 }
 
 func formatEpochMillis(s string) string {
