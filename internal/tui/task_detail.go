@@ -4,6 +4,7 @@ package tui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -26,13 +27,26 @@ const (
 	fieldCopy     fieldKind = iota // y copies the value
 	fieldOpen                      // y copies, o opens URL
 	fieldNavigate                  // Enter navigates to task, y copies ID
+	fieldEdit                      // e opens an editor modal
+)
+
+// editType identifies the type of editor modal to use for a fieldEdit field.
+type editType int
+
+const (
+	editTypeText     editType = iota // single-line text input
+	editTypeTextArea                 // multi-line text area
+	editTypeDate                     // date input (YYYY-MM-DD)
+	editTypeAssignee                 // multi-select assignee picker
 )
 
 // selectableField represents a single field in the selector overlay.
 type selectableField struct {
-	label string    // Display name (e.g., "Task ID", "URL", "Due Date")
-	value string    // Raw copyable value
-	kind  fieldKind // What kind of action is available
+	label    string    // Display name (e.g., "Task ID", "URL", "Due Date")
+	value    string    // Raw copyable value (empty string for placeholder fields)
+	kind     fieldKind // What kind of action is available
+	edit     editType  // Editor type (only meaningful when kind == fieldEdit)
+	hasValue bool      // Whether the field has a real value (vs. placeholder)
 }
 
 type moveListOption struct {
@@ -157,6 +171,15 @@ func (td *TaskDetailPane) selectorInputHandler(event *tcell.EventKey) *tcell.Eve
 		case 'y':
 			td.copyFieldAndExit(td.fields[td.selectedIdx])
 			return nil
+		case 'e':
+			f := td.fields[td.selectedIdx]
+			if f.kind == fieldEdit {
+				td.exitSelectorMode()
+				td.dispatchEdit(f)
+				return nil
+			}
+			// Ignore 'e' on non-editable fields.
+			return nil
 		case 'o':
 			f := td.fields[td.selectedIdx]
 			if f.kind == fieldOpen {
@@ -180,7 +203,7 @@ func (td *TaskDetailPane) enterSelectorMode() {
 	td.selectorMode = true
 	td.selectedIdx = 0
 	td.renderWithSelector()
-	td.tuiApp.footer.SetHelp("↑↓:field", "y:copy", "o:open", "Enter:go", "Esc:back")
+	td.tuiApp.footer.SetHelp("↑↓:field", "y:copy", "o:open", "e:edit", "Enter:go", "Esc:back")
 }
 
 // exitSelectorMode deactivates the field selector and re-renders clean.
@@ -532,6 +555,242 @@ func (td *TaskDetailPane) applyMoveToList(workspaceID, taskID, listID, listName 
 	}()
 }
 
+// ── Field editing ─────────────────────────────────────────────────────────────
+
+// dispatchEdit opens the appropriate editor modal for f.
+// Must be called from the UI goroutine.
+func (td *TaskDetailPane) dispatchEdit(f selectableField) {
+	switch f.edit {
+	case editTypeDate:
+		td.editDate(f)
+	case editTypeTextArea:
+		td.editDescription(f)
+	case editTypeAssignee:
+		td.editAssignees()
+	}
+}
+
+// editDate opens a date modal for a Due Date or Start Date field.
+func (td *TaskDetailPane) editDate(f selectableField) {
+	taskID := td.taskID
+	listID := td.listID
+	isDueDate := f.label == "Due Date"
+
+	ShowDateModal(td.tuiApp, DateModalConfig{
+		Title:      " Edit " + f.label + " ",
+		Initial:    f.value, // already in YYYY-MM-DD or empty
+		AllowClear: true,
+		OnSubmit: func(date string) {
+			td.applyDateUpdate(taskID, listID, isDueDate, date)
+		},
+		OnCancel: func() {
+			td.tuiApp.footer.SetStatusReady("Edit cancelled")
+		},
+	})
+}
+
+// applyDateUpdate calls UpdateTask with the new date value and refreshes panes.
+// date is YYYY-MM-DD or "" to clear.
+func (td *TaskDetailPane) applyDateUpdate(taskID, listID string, isDueDate bool, date string) {
+	// Convert YYYY-MM-DD to epoch milliseconds string, or "" to clear.
+	var epochMS string
+	if date != "" {
+		t, err := time.Parse(time.DateOnly, date)
+		if err != nil {
+			td.tuiApp.setError("invalid date: %v", err)
+			return
+		}
+		epochMS = strconv.FormatInt(t.UnixMilli(), 10)
+	}
+
+	var input app.UpdateTaskInput
+	if isDueDate {
+		input.DueDate = &epochMS
+		td.tuiApp.setStatusLoading("Updating due date…")
+	} else {
+		// Start date reuse DueDate field label but needs its own API field.
+		// For now map to DueDate; when a StartDate API field exists swap here.
+		// ClickUp v2 does not expose start_date in the update task endpoint
+		// the same way — set DueDate only for due date, skip for start date.
+		// TODO: add StartDate to UpdateTaskInput when the API supports it.
+		td.tuiApp.footer.SetStatusReady("Start date editing not supported by the API yet")
+		return
+	}
+
+	go func() {
+		err := td.tuiApp.tasks.UpdateTask(td.tuiApp.ctx, taskID, input)
+		td.tuiApp.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				td.tuiApp.logger.Error("update task date", "task", taskID, "error", err)
+				td.tuiApp.setError("update date: %v", err)
+				return
+			}
+			td.tuiApp.tasks.InvalidateTaskDetail(taskID)
+			td.LoadDetail(taskID)
+			td.tuiApp.tasks.InvalidateTaskList(listID)
+			td.tuiApp.taskList.reapplyFilter()
+			if date == "" {
+				td.tuiApp.footer.SetStatusReady("Due date cleared")
+			} else {
+				td.tuiApp.footer.SetStatusReady("Due date → " + date)
+			}
+		})
+	}()
+}
+
+// editDescription opens a textarea modal for the description field.
+func (td *TaskDetailPane) editDescription(f selectableField) {
+	taskID := td.taskID
+	listID := td.listID
+
+	ShowTextAreaModal(td.tuiApp, TextAreaModalConfig{
+		Title:   " Edit Description ",
+		Initial: f.value,
+		OnSubmit: func(text string) {
+			td.applyDescriptionUpdate(taskID, listID, text)
+		},
+		OnCancel: func() {
+			td.tuiApp.footer.SetStatusReady("Edit cancelled")
+		},
+	})
+}
+
+// applyDescriptionUpdate calls UpdateTask with the new description and refreshes.
+func (td *TaskDetailPane) applyDescriptionUpdate(taskID, listID, description string) {
+	td.tuiApp.setStatusLoading("Updating description…")
+
+	go func() {
+		err := td.tuiApp.tasks.UpdateTask(td.tuiApp.ctx, taskID, app.UpdateTaskInput{
+			Description: &description,
+		})
+		td.tuiApp.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				td.tuiApp.logger.Error("update task description", "task", taskID, "error", err)
+				td.tuiApp.setError("update description: %v", err)
+				return
+			}
+			td.tuiApp.tasks.InvalidateTaskDetail(taskID)
+			td.LoadDetail(taskID)
+			_ = listID // description doesn't affect task list display
+			td.tuiApp.footer.SetStatusReady("Description updated")
+		})
+	}()
+}
+
+// editAssignees loads list members and opens a multi-select modal.
+func (td *TaskDetailPane) editAssignees() {
+	taskID := td.taskID
+	listID := td.listID
+	currentIDs := td.detail.AssigneeIDs
+
+	td.tuiApp.setStatusLoading("Loading members…")
+
+	go func() {
+		members, err := td.tuiApp.tasks.LoadMembers(td.tuiApp.ctx, listID)
+		td.tuiApp.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				td.tuiApp.logger.Error("load members for assignee edit", "list", listID, "error", err)
+				td.tuiApp.setError("load members: %v", err)
+				return
+			}
+			td.tuiApp.footer.SetStatusReady("")
+			td.showAssigneeModal(taskID, listID, currentIDs, members)
+		})
+	}()
+}
+
+// showAssigneeModal renders the assignee multi-select modal.
+// Must be called from the UI goroutine.
+func (td *TaskDetailPane) showAssigneeModal(taskID, listID string, currentIDs []int, members []app.MemberSummary) {
+	// Build option list — pre-select current assignees.
+	currentSet := make(map[int]struct{}, len(currentIDs))
+	for _, id := range currentIDs {
+		currentSet[id] = struct{}{}
+	}
+
+	opts := make([]SelectOption, len(members))
+	for i, m := range members {
+		label := m.Username
+		if m.Email != "" {
+			label += " (" + m.Email + ")"
+		}
+		_, preSelected := currentSet[m.ID]
+		opts[i] = SelectOption{
+			Label:    label,
+			Value:    strconv.Itoa(m.ID),
+			Selected: preSelected,
+		}
+	}
+
+	ShowSelectModal(td.tuiApp, SelectModalConfig{
+		Title:   " Edit Assignees ",
+		Options: opts,
+		Multi:   true,
+		OnSubmit: func(selected []string) {
+			td.applyAssigneeUpdate(taskID, listID, currentIDs, selected)
+		},
+		OnCancel: func() {
+			td.tuiApp.footer.SetStatusReady("Edit cancelled")
+		},
+	})
+}
+
+// applyAssigneeUpdate computes add/remove diffs and calls UpdateTask.
+func (td *TaskDetailPane) applyAssigneeUpdate(taskID, listID string, currentIDs []int, selectedValues []string) {
+	// Parse selected IDs.
+	selectedSet := make(map[int]struct{}, len(selectedValues))
+	for _, v := range selectedValues {
+		id, err := strconv.Atoi(v)
+		if err == nil {
+			selectedSet[id] = struct{}{}
+		}
+	}
+
+	// Compute add = selected - current.
+	currentSet := make(map[int]struct{}, len(currentIDs))
+	for _, id := range currentIDs {
+		currentSet[id] = struct{}{}
+	}
+
+	var add, rem []int
+	for id := range selectedSet {
+		if _, ok := currentSet[id]; !ok {
+			add = append(add, id)
+		}
+	}
+	for id := range currentSet {
+		if _, ok := selectedSet[id]; !ok {
+			rem = append(rem, id)
+		}
+	}
+
+	if len(add) == 0 && len(rem) == 0 {
+		td.tuiApp.footer.SetStatusReady("No changes to assignees")
+		return
+	}
+
+	td.tuiApp.setStatusLoading("Updating assignees…")
+
+	go func() {
+		err := td.tuiApp.tasks.UpdateTask(td.tuiApp.ctx, taskID, app.UpdateTaskInput{
+			AssigneesAdd: add,
+			AssigneesRem: rem,
+		})
+		td.tuiApp.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				td.tuiApp.logger.Error("update task assignees", "task", taskID, "error", err)
+				td.tuiApp.setError("update assignees: %v", err)
+				return
+			}
+			td.tuiApp.tasks.InvalidateTaskDetail(taskID)
+			td.LoadDetail(taskID)
+			td.tuiApp.tasks.InvalidateTaskList(listID)
+			td.tuiApp.taskList.reapplyFilter()
+			td.tuiApp.footer.SetStatusReady("Assignees updated")
+		})
+	}()
+}
+
 // ── Rendering helpers ─────────────────────────────────────────────────────────
 
 // detailLabel returns a right-padded, coloured label for a field row.
@@ -804,8 +1063,25 @@ func (td *TaskDetailPane) renderSelectorRow(b *strings.Builder, f selectableFiel
 		label += strings.Repeat(" ", labelWidth-len(f.label))
 	}
 
-	// Value display — truncate long values for readability.
-	val := truncateDisplay(f.value, 48)
+	// Value display — use placeholder text for empty editable fields.
+	var val string
+	var valColor tcell.Color
+	if !f.hasValue && f.kind == fieldEdit {
+		switch f.edit {
+		case editTypeDate:
+			val = "(no date)"
+		case editTypeTextArea:
+			val = "(no description)"
+		case editTypeAssignee:
+			val = "(no assignees)"
+		default:
+			val = "(none)"
+		}
+		valColor = ColorTextMuted
+	} else {
+		val = truncateDisplay(f.value, 48)
+		valColor = ColorDetailValue
+	}
 
 	// Kind hint suffix.
 	var hint string
@@ -814,6 +1090,8 @@ func (td *TaskDetailPane) renderSelectorRow(b *strings.Builder, f selectableFiel
 		hint = tagColor(ColorTextMuted) + "  [o:open]" + "[-]"
 	case fieldNavigate:
 		hint = tagColor(ColorTextMuted) + "  [↵:go]" + "[-]"
+	case fieldEdit:
+		hint = tagColor(ColorTextMuted) + "  [e:edit]" + "[-]"
 	default:
 		hint = ""
 	}
@@ -824,7 +1102,7 @@ func (td *TaskDetailPane) renderSelectorRow(b *strings.Builder, f selectableFiel
 		fmt.Fprintf(b, "%s%s%s[-]  %s%s[-]%s\n",
 			cursor,
 			tagColor(ColorDetailLabel), label,
-			tagColor(ColorDetailValue), tview.Escape(val),
+			tagColor(valColor), tview.Escape(val),
 			hint)
 	}
 }
@@ -832,33 +1110,89 @@ func (td *TaskDetailPane) renderSelectorRow(b *strings.Builder, f selectableFiel
 // ── Field registry ───────────────────────────────────────────────────────────
 
 // buildFields populates the selectable field list from a TaskDetail.
-// Fields with empty values are excluded.
+// Read-only fields with empty values are excluded.
+// Editable fields always appear, using a placeholder when the value is absent.
 func (td *TaskDetailPane) buildFields(d *app.TaskDetail) {
 	if td.fields != nil {
 		td.fields = td.fields[:0]
 	}
 
-	// Always include the task ID.
-	td.fields = append(td.fields, selectableField{"Task ID", d.ID, fieldCopy})
+	// Always include the task ID (read-only copy).
+	td.fields = append(td.fields, selectableField{
+		label:    "Task ID",
+		value:    d.ID,
+		kind:     fieldCopy,
+		hasValue: true,
+	})
 	if d.CustomID != "" {
-		td.fields = append(td.fields, selectableField{"Custom ID", d.CustomID, fieldCopy})
+		td.fields = append(td.fields, selectableField{
+			label:    "Custom ID",
+			value:    d.CustomID,
+			kind:     fieldCopy,
+			hasValue: true,
+		})
 	}
 	if d.URL != "" {
-		td.fields = append(td.fields, selectableField{"URL", d.URL, fieldOpen})
+		td.fields = append(td.fields, selectableField{
+			label:    "URL",
+			value:    d.URL,
+			kind:     fieldOpen,
+			hasValue: true,
+		})
 	}
-	if d.DueDate != "" {
-		td.fields = append(td.fields, selectableField{"Due Date", d.DueDate, fieldCopy})
-	}
-	if d.StartDate != "" {
-		td.fields = append(td.fields, selectableField{"Start Date", d.StartDate, fieldCopy})
-	}
+
+	// Editable: due date — always present so the user can set it when empty.
+	td.fields = append(td.fields, selectableField{
+		label:    "Due Date",
+		value:    d.DueDate,
+		kind:     fieldEdit,
+		edit:     editTypeDate,
+		hasValue: d.DueDate != "",
+	})
+
+	// Editable: start date — always present so the user can set it when empty.
+	td.fields = append(td.fields, selectableField{
+		label:    "Start Date",
+		value:    d.StartDate,
+		kind:     fieldEdit,
+		edit:     editTypeDate,
+		hasValue: d.StartDate != "",
+	})
+
 	if d.Parent != "" {
-		td.fields = append(td.fields, selectableField{"Parent", d.Parent, fieldNavigate})
+		td.fields = append(td.fields, selectableField{
+			label:    "Parent",
+			value:    d.Parent,
+			kind:     fieldNavigate,
+			hasValue: true,
+		})
 	}
-	if d.Description != "" {
-		td.fields = append(td.fields, selectableField{"Description", d.Description, fieldCopy})
-	}
+
+	// Editable: description — always present so the user can set it when empty.
+	td.fields = append(td.fields, selectableField{
+		label:    "Description",
+		value:    d.Description,
+		kind:     fieldEdit,
+		edit:     editTypeTextArea,
+		hasValue: d.Description != "",
+	})
+
+	// Editable: assignees — always present so the user can set them when empty.
+	assigneeDisplay := strings.Join(d.Assignees, ", ")
+	td.fields = append(td.fields, selectableField{
+		label:    "Assignees",
+		value:    assigneeDisplay,
+		kind:     fieldEdit,
+		edit:     editTypeAssignee,
+		hasValue: len(d.Assignees) > 0,
+	})
+
 	for _, st := range d.Subtasks {
-		td.fields = append(td.fields, selectableField{icons.SubtaskPrefix + " " + st.Name, st.ID, fieldNavigate})
+		td.fields = append(td.fields, selectableField{
+			label:    icons.SubtaskPrefix + " " + st.Name,
+			value:    st.ID,
+			kind:     fieldNavigate,
+			hasValue: true,
+		})
 	}
 }

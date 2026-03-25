@@ -357,6 +357,8 @@ func TestBuildFields_AllPopulated(t *testing.T) {
 		StartDate:   "2024-05-15",
 		Parent:      "parent1",
 		Description: "A task description.",
+		Assignees:   []string{"alice"},
+		AssigneeIDs: []int{101},
 		Subtasks: []app.SubtaskSummary{
 			{ID: "sub1", Name: "Subtask A", Status: "open"},
 			{ID: "sub2", Name: "Subtask B", Status: "done"},
@@ -364,10 +366,20 @@ func TestBuildFields_AllPopulated(t *testing.T) {
 	}
 	tdp.buildFields(d)
 
-	// Expected fields: Task ID, Custom ID, URL, Due Date, Start Date, Parent,
-	// Description, + 2 subtasks = 9.
-	if got := len(tdp.fields); got != 9 {
-		t.Fatalf("buildFields() produced %d fields, want 9", got)
+	// Expected fields:
+	//   0: Task ID (fieldCopy)
+	//   1: Custom ID (fieldCopy)
+	//   2: URL (fieldOpen)
+	//   3: Due Date (fieldEdit/date, has value)
+	//   4: Start Date (fieldEdit/date, has value)
+	//   5: Parent (fieldNavigate)
+	//   6: Description (fieldEdit/textarea, has value)
+	//   7: Assignees (fieldEdit/assignee, has value)
+	//   8: sub1 (fieldNavigate)
+	//   9: sub2 (fieldNavigate)
+	// Total = 10.
+	if got := len(tdp.fields); got != 10 {
+		t.Fatalf("buildFields() produced %d fields, want 10", got)
 	}
 
 	// Verify first field is always Task ID.
@@ -378,20 +390,32 @@ func TestBuildFields_AllPopulated(t *testing.T) {
 	if f := tdp.fields[2]; f.label != "URL" || f.kind != fieldOpen {
 		t.Errorf("fields[2] = %+v, want URL / fieldOpen", f)
 	}
+	// Verify Due Date field is editable with a value.
+	if f := tdp.fields[3]; f.label != "Due Date" || f.kind != fieldEdit || f.edit != editTypeDate || !f.hasValue {
+		t.Errorf("fields[3] = %+v, want Due Date / fieldEdit/date / hasValue=true", f)
+	}
+	// Verify Description field is editable.
+	if f := tdp.fields[6]; f.label != "Description" || f.kind != fieldEdit || f.edit != editTypeTextArea {
+		t.Errorf("fields[6] = %+v, want Description / fieldEdit/textarea", f)
+	}
+	// Verify Assignees field is editable.
+	if f := tdp.fields[7]; f.label != "Assignees" || f.kind != fieldEdit || f.edit != editTypeAssignee || !f.hasValue {
+		t.Errorf("fields[7] = %+v, want Assignees / fieldEdit/assignee / hasValue=true", f)
+	}
 	// Verify Parent field has fieldNavigate kind.
 	if f := tdp.fields[5]; f.label != "Parent" || f.kind != fieldNavigate {
 		t.Errorf("fields[5] = %+v, want Parent / fieldNavigate", f)
 	}
 	// Verify subtask fields have fieldNavigate kind and use subtask ID as value.
-	if f := tdp.fields[7]; f.kind != fieldNavigate || f.value != "sub1" {
-		t.Errorf("fields[7] = %+v, want fieldNavigate with value sub1", f)
+	if f := tdp.fields[8]; f.kind != fieldNavigate || f.value != "sub1" {
+		t.Errorf("fields[8] = %+v, want fieldNavigate with value sub1", f)
 	}
-	if f := tdp.fields[8]; f.kind != fieldNavigate || f.value != "sub2" {
-		t.Errorf("fields[8] = %+v, want fieldNavigate with value sub2", f)
+	if f := tdp.fields[9]; f.kind != fieldNavigate || f.value != "sub2" {
+		t.Errorf("fields[9] = %+v, want fieldNavigate with value sub2", f)
 	}
 }
 
-func TestBuildFields_EmptyValuesExcluded(t *testing.T) {
+func TestBuildFields_EditableFieldsAlwaysPresent(t *testing.T) {
 	tdp := newTestDetailPane()
 	d := &app.TaskDetail{
 		ID:     "task1",
@@ -400,12 +424,48 @@ func TestBuildFields_EmptyValuesExcluded(t *testing.T) {
 	}
 	tdp.buildFields(d)
 
-	// Only Task ID should be present — all optional fields are empty.
-	if got := len(tdp.fields); got != 1 {
-		t.Fatalf("buildFields() with minimal detail produced %d fields, want 1", got)
+	// Editable fields (Due Date, Start Date, Description, Assignees) are
+	// always present even when empty, so the user can set them.
+	// Expected: Task ID, Due Date, Start Date, Description, Assignees = 5.
+	if got := len(tdp.fields); got != 5 {
+		t.Fatalf("buildFields() with minimal detail produced %d fields, want 5", got)
 	}
 	if f := tdp.fields[0]; f.label != "Task ID" {
 		t.Errorf("fields[0].label = %q, want 'Task ID'", f.label)
+	}
+	// Editable fields should be present but flagged as having no value.
+	labels := map[string]bool{}
+	for _, f := range tdp.fields {
+		labels[f.label] = true
+	}
+	for _, want := range []string{"Due Date", "Start Date", "Description", "Assignees"} {
+		if !labels[want] {
+			t.Errorf("buildFields() missing always-present editable field %q", want)
+		}
+	}
+	// Editable empty fields should have hasValue=false.
+	for _, f := range tdp.fields[1:] {
+		if f.kind == fieldEdit && f.hasValue {
+			t.Errorf("fields label=%q: empty editable field should have hasValue=false", f.label)
+		}
+	}
+}
+
+func TestBuildFields_EmptyValuesExcluded_ReadOnly(t *testing.T) {
+	tdp := newTestDetailPane()
+	d := &app.TaskDetail{
+		ID:     "task1",
+		Name:   "Minimal Task",
+		Status: "open",
+	}
+	tdp.buildFields(d)
+
+	// Read-only optional fields (CustomID, URL, Parent) should NOT appear when empty.
+	for _, f := range tdp.fields {
+		switch f.label {
+		case "Custom ID", "URL", "Parent":
+			t.Errorf("buildFields() should exclude empty read-only field %q", f.label)
+		}
 	}
 }
 
@@ -421,14 +481,15 @@ func TestBuildFields_SubtasksIncluded(t *testing.T) {
 	}
 	tdp.buildFields(d)
 
-	// 1 (Task ID) + 3 subtasks = 4.
-	if got := len(tdp.fields); got != 4 {
-		t.Fatalf("buildFields() with 3 subtasks produced %d fields, want 4", got)
+	// 1 (Task ID) + 4 always-present editable + 3 subtasks = 8.
+	if got := len(tdp.fields); got != 8 {
+		t.Fatalf("buildFields() with 3 subtasks produced %d fields, want 8", got)
 	}
-	// All subtask fields should be navigate kind.
-	for i := 1; i < 4; i++ {
-		if tdp.fields[i].kind != fieldNavigate {
-			t.Errorf("fields[%d].kind = %d, want fieldNavigate", i, tdp.fields[i].kind)
+	// Subtask fields should be navigate kind with correct IDs.
+	subtaskFields := tdp.fields[5:] // after Task ID + Due Date + Start Date + Description + Assignees
+	for i, f := range subtaskFields {
+		if f.kind != fieldNavigate {
+			t.Errorf("subtask fields[%d].kind = %d, want fieldNavigate", i, f.kind)
 		}
 	}
 }
@@ -450,8 +511,9 @@ func TestBuildFields_ResetsBetweenCalls(t *testing.T) {
 	if first == second {
 		t.Errorf("buildFields should reset: first call had %d fields, second had %d (same)", first, second)
 	}
-	if second != 1 {
-		t.Errorf("buildFields after minimal detail: got %d fields, want 1", second)
+	// Minimal task always has: Task ID + Due Date + Start Date + Description + Assignees = 5.
+	if second != 5 {
+		t.Errorf("buildFields after minimal detail: got %d fields, want 5", second)
 	}
 }
 
