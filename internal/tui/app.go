@@ -78,6 +78,11 @@ type App struct {
 	treeVisible  bool
 	treeMinWidth int // proportion when tree is visible
 
+	// modalActive is true when a modal overlay is currently visible.
+	// When set, globalInputHandler suppresses all global shortcuts so the
+	// modal can handle all input exclusively.
+	modalActive bool
+
 	// ctx is the application-level context, set during Run and propagated to
 	// all background goroutines so they can be cancelled on shutdown.
 	ctx context.Context //nolint:containedctx // App-level ctx propagated to async UI handlers.
@@ -136,6 +141,7 @@ func (a *App) buildLayout() {
 			}
 		},
 		func() {
+			a.SetModalActive(false)
 			a.paneStylers[paneTree].SetFilterText("")
 			// Hide the filter input row.
 			a.treeFilterRow.ResizeItem(a.treeFilter.InputField(), 0, 0)
@@ -144,6 +150,7 @@ func (a *App) buildLayout() {
 			a.tree.ClearFilter()
 		},
 		func() {
+			a.SetModalActive(false)
 			// Return focus and restore help when filter is applied (Enter).
 			a.tviewApp.SetFocus(a.tree)
 			if !a.treeFilter.IsActive() {
@@ -166,6 +173,7 @@ func (a *App) buildLayout() {
 			}
 		},
 		func() {
+			a.SetModalActive(false)
 			a.paneStylers[paneTaskList].SetFilterText("")
 			// Hide the filter input row.
 			a.taskListFilterRow.ResizeItem(a.taskListFilter.InputField(), 0, 0)
@@ -174,6 +182,7 @@ func (a *App) buildLayout() {
 			a.taskList.ClearFilter()
 		},
 		func() {
+			a.SetModalActive(false)
 			// Return focus and restore help when filter is applied (Enter).
 			a.tviewApp.SetFocus(a.taskList)
 			if !a.taskListFilter.IsActive() {
@@ -234,6 +243,12 @@ func (a *App) buildLayout() {
 }
 
 func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
+	// When a modal overlay is active, suppress all global shortcuts so the
+	// modal receives all input exclusively.
+	if a.IsModalActive() {
+		return event
+	}
+
 	// When a filter overlay is in edit mode, only allow Esc and Enter
 	// (handled by the overlay itself). Block all other global keybindings
 	// so they don't propagate.
@@ -343,6 +358,20 @@ func (a *App) setTreeVisible(visible bool) {
 	}
 }
 
+// ── Modal state management ────────────────────────────────────────────────────
+
+// SetModalActive marks a modal overlay as active or inactive.
+// When active, globalInputHandler suppresses all global shortcuts so that
+// the modal can handle all input exclusively.
+func (a *App) SetModalActive(active bool) {
+	a.modalActive = active
+}
+
+// IsModalActive reports whether a modal overlay is currently visible.
+func (a *App) IsModalActive() bool {
+	return a.modalActive
+}
+
 // ── Filter overlay management ────────────────────────────────────────────────
 
 // isFilterEditing reports whether any filter overlay is currently in editing
@@ -375,6 +404,7 @@ func (a *App) activateFilter() {
 	filterRow.ResizeItem(overlay.InputField(), 1, 0)
 	overlay.Show()
 	a.tviewApp.SetFocus(overlay.InputField())
+	a.SetModalActive(true)
 
 	// Update footer to show filter-mode keybindings.
 	a.footer.SetHelp("Enter:apply filter", "Esc:clear filter")

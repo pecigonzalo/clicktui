@@ -212,6 +212,61 @@ func TestGlobalInputHandler_FilterEditingPassesThrough(t *testing.T) {
 	}
 }
 
+// ── Modal state management ────────────────────────────────────────────────────
+
+func TestIsModalActive_FalseByDefault(t *testing.T) {
+	a := &App{}
+	if a.IsModalActive() {
+		t.Error("IsModalActive() = true on zero-value App, want false")
+	}
+}
+
+func TestSetModalActive_True(t *testing.T) {
+	a := &App{}
+	a.SetModalActive(true)
+	if !a.IsModalActive() {
+		t.Error("IsModalActive() = false after SetModalActive(true), want true")
+	}
+}
+
+func TestSetModalActive_False(t *testing.T) {
+	a := &App{modalActive: true}
+	a.SetModalActive(false)
+	if a.IsModalActive() {
+		t.Error("IsModalActive() = true after SetModalActive(false), want false")
+	}
+}
+
+func TestGlobalInputHandler_ModalActive_SuppressesAllKeys(t *testing.T) {
+	// When a modal is active, globalInputHandler must pass all events through
+	// unchanged (return the event, not nil) so the modal handles input.
+	a := &App{
+		modalActive:    true,
+		treeFilter:     NewFilterOverlay(func(string) {}, func() {}, func() {}),
+		taskListFilter: NewFilterOverlay(func(string) {}, func() {}, func() {}),
+	}
+
+	cases := []struct {
+		name  string
+		event *tcell.EventKey
+	}{
+		{"Tab", tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)},
+		{"BackTab", tcell.NewEventKey(tcell.KeyBacktab, 0, tcell.ModNone)},
+		{"q", tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone)},
+		{"S", tcell.NewEventKey(tcell.KeyRune, 'S', tcell.ModNone)},
+		{"slash", tcell.NewEventKey(tcell.KeyRune, '/', tcell.ModNone)},
+		{"bracket", tcell.NewEventKey(tcell.KeyRune, '[', tcell.ModNone)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := a.globalInputHandler(tc.event)
+			if got == nil {
+				t.Errorf("globalInputHandler(%s) with modal active = nil (consumed), want event passed through", tc.name)
+			}
+		})
+	}
+}
+
 // ── paneID constants ─────────────────────────────────────────────────────────
 
 func TestPaneIDConstants_AreSequential(t *testing.T) {

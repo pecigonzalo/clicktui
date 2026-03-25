@@ -279,6 +279,7 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 	// dismissModal closes the picker, restores focus chrome, and resets footer
 	// help to the default keybinding set.
 	dismissModal := func() {
+		td.tuiApp.SetModalActive(false)
 		td.tuiApp.pages.RemovePage(pageStatusPicker)
 		td.tuiApp.setFocusPane(paneTaskDetail)
 		td.tuiApp.restoreDefaultHelp()
@@ -323,6 +324,9 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 
 	// Hint in footer while modal is open.
 	td.tuiApp.footer.SetHelp("Enter:select", "Esc:cancel")
+
+	// Mark modal as active so globalInputHandler suppresses global shortcuts.
+	td.tuiApp.SetModalActive(true)
 
 	// Height: status rows + cancel row + borders + secondary-text rows.
 	// Each list item takes 2 rows when secondary text is shown; cap at 30.
