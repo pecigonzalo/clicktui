@@ -254,7 +254,7 @@ func TestTaskService_UpdateTaskStatus_RateLimit(t *testing.T) {
 }
 
 func TestTaskService_LoadTaskDetail_LongDescription(t *testing.T) {
-	// Verify that descriptions longer than 500 chars are truncated.
+	// Verify that descriptions longer than 500 chars are preserved in full (no truncation).
 	long := make([]byte, 600)
 	for i := range long {
 		long[i] = 'x'
@@ -271,8 +271,7 @@ func TestTaskService_LoadTaskDetail_LongDescription(t *testing.T) {
 	svc := app.NewTaskService(api)
 	detail, err := svc.LoadTaskDetail(context.Background(), "t1")
 	require.NoError(t, err)
-	assert.LessOrEqual(t, len(detail.Description), 503) // 500 + "..."
-	assert.True(t, len(detail.Description) > 0)
+	assert.Equal(t, 600, len(detail.Description), "full description should be preserved without truncation")
 }
 
 func TestTaskService_LoadTaskDetail_InvalidDateFormat(t *testing.T) {
@@ -592,6 +591,9 @@ type countingAPI struct {
 	tasksCalls        atomic.Int64
 	listStatusesCalls atomic.Int64
 	updateStatusCalls atomic.Int64
+	updateTaskCalls   atomic.Int64
+	createTaskCalls   atomic.Int64
+	listMembersCalls  atomic.Int64
 }
 
 func newCountingAPI() *countingAPI {
@@ -616,6 +618,21 @@ func (c *countingAPI) ListStatuses(ctx context.Context, listID string) ([]clicku
 func (c *countingAPI) UpdateTaskStatus(ctx context.Context, taskID, status string) (*clickup.Task, error) {
 	c.updateStatusCalls.Add(1)
 	return c.fakeAPI.UpdateTaskStatus(ctx, taskID, status)
+}
+
+func (c *countingAPI) UpdateTask(ctx context.Context, taskID string, req clickup.UpdateTaskRequest) (*clickup.Task, error) {
+	c.updateTaskCalls.Add(1)
+	return c.fakeAPI.UpdateTask(ctx, taskID, req)
+}
+
+func (c *countingAPI) CreateTask(ctx context.Context, listID string, req clickup.CreateTaskRequest) (*clickup.Task, error) {
+	c.createTaskCalls.Add(1)
+	return c.fakeAPI.CreateTask(ctx, listID, req)
+}
+
+func (c *countingAPI) ListMembers(ctx context.Context, listID string) ([]clickup.Member, error) {
+	c.listMembersCalls.Add(1)
+	return c.fakeAPI.ListMembers(ctx, listID)
 }
 
 // --- Cache behavior tests ---
@@ -1025,4 +1042,203 @@ func TestTaskService_Singleflight_InvalidateForgetsCausesRefresh(t *testing.T) {
 	assert.Equal(t, "in progress", d2.Status)
 	assert.Equal(t, int64(2), api.taskCalls.Load(),
 		"after invalidation the API must be called again")
+}
+
+// --- Part B: Full description, AssigneeIDs, UpdateTask, CreateTask, LoadMembers ---
+
+func TestTaskService_LoadTaskDetail_FullDescriptionPreserved(t *testing.T) {
+	// Descriptions of any length must be stored verbatim — no truncation.
+	const descLen = 2000
+	desc := make([]byte, descLen)
+	for i := range desc {
+		desc[i] = 'z'
+	}
+	api := newFakeAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:          "t1",
+		Name:        "Full desc",
+		Status:      clickup.Status{Status: "open"},
+		Description: string(desc),
+		List:        clickup.TaskRef{ID: "l1"},
+	}
+
+	svc := app.NewTaskService(api)
+	detail, err := svc.LoadTaskDetail(context.Background(), "t1")
+	require.NoError(t, err)
+	assert.Equal(t, descLen, len(detail.Description),
+		"LoadTaskDetail should preserve the full description without truncation")
+}
+
+func TestTaskService_LoadTaskDetail_AssigneeIDsPreserved(t *testing.T) {
+	api := newFakeAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Task with assignees",
+		Status: clickup.Status{Status: "open"},
+		Assignees: []clickup.Assignee{
+			{ID: 10, Username: "alice"},
+			{ID: 20, Username: "bob"},
+		},
+		List: clickup.TaskRef{ID: "l1"},
+	}
+
+	svc := app.NewTaskService(api)
+	detail, err := svc.LoadTaskDetail(context.Background(), "t1")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"alice", "bob"}, detail.Assignees)
+	assert.Equal(t, []int{10, 20}, detail.AssigneeIDs,
+		"AssigneeIDs should contain the numeric IDs of all assignees")
+}
+
+func TestTaskService_UpdateTask_InvalidatesDetailAndListCaches(t *testing.T) {
+	api := newCountingAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Original name",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l1", Name: "Sprint"},
+	}
+	api.tasks["l1"] = []clickup.Task{
+		{ID: "t1", Name: "Original name", Status: clickup.Status{Status: "open"}},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// Prime both caches.
+	_, err := svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	_, err = svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), api.taskCalls.Load())
+	assert.Equal(t, int64(1), api.tasksCalls.Load())
+
+	// Update the task.
+	newName := "New name"
+	err = svc.UpdateTask(ctx, "t1", app.UpdateTaskInput{Name: &newName})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), api.updateTaskCalls.Load())
+
+	// Detail cache should now serve the value returned by UpdateTask (no extra API call).
+	d2, err := svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), api.taskCalls.Load(), "detail served from cache populated by UpdateTask")
+	_ = d2
+
+	// Task list cache should have been evicted — next call hits API.
+	_, err = svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), api.tasksCalls.Load(), "task list cache should have been evicted by UpdateTask")
+}
+
+func TestTaskService_UpdateTask_Error(t *testing.T) {
+	api := newFakeAPI()
+	api.updateTaskErr = &clickup.APIError{StatusCode: 400, Body: `{"err":"Bad request"}`}
+
+	svc := app.NewTaskService(api)
+	newName := "x"
+	err := svc.UpdateTask(context.Background(), "t1", app.UpdateTaskInput{Name: &newName})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "update task")
+
+	var apiErr *clickup.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 400, apiErr.StatusCode)
+}
+
+func TestTaskService_CreateTask_InvalidatesListCache(t *testing.T) {
+	api := newCountingAPI()
+	api.tasks["l1"] = []clickup.Task{
+		{ID: "t1", Name: "Existing task", Status: clickup.Status{Status: "open"}},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// Prime the task list cache.
+	_, err := svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), api.tasksCalls.Load())
+
+	// Create a new task.
+	id, err := svc.CreateTask(ctx, "l1", app.CreateTaskInput{Name: "Brand new task"})
+	require.NoError(t, err)
+	assert.NotEmpty(t, id)
+	assert.Equal(t, int64(1), api.createTaskCalls.Load())
+
+	// Task list cache should be evicted — next LoadTasks hits the API.
+	_, err = svc.LoadTasks(ctx, "l1", 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), api.tasksCalls.Load(), "task list cache should have been evicted by CreateTask")
+}
+
+func TestTaskService_CreateTask_ReturnsNewTaskID(t *testing.T) {
+	api := newFakeAPI()
+	api.createdTask = &clickup.Task{ID: "fresh-id", Name: "Created"}
+
+	svc := app.NewTaskService(api)
+	id, err := svc.CreateTask(context.Background(), "l1", app.CreateTaskInput{Name: "Created"})
+	require.NoError(t, err)
+	assert.Equal(t, "fresh-id", id)
+}
+
+func TestTaskService_CreateTask_Error(t *testing.T) {
+	api := newFakeAPI()
+	api.createTaskErr = &clickup.APIError{StatusCode: 400, Body: `{"err":"Bad request"}`}
+
+	svc := app.NewTaskService(api)
+	_, err := svc.CreateTask(context.Background(), "l1", app.CreateTaskInput{Name: "Task"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create task")
+
+	var apiErr *clickup.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 400, apiErr.StatusCode)
+}
+
+func TestTaskService_LoadMembers_CachesResult(t *testing.T) {
+	api := newCountingAPI()
+	api.membersByListID["l1"] = []clickup.Member{
+		{ID: 1, Username: "alice", Email: "alice@example.com"},
+		{ID: 2, Username: "bob", Email: "bob@example.com"},
+	}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// First call — cache miss.
+	m1, err := svc.LoadMembers(ctx, "l1")
+	require.NoError(t, err)
+	require.Len(t, m1, 2)
+	assert.Equal(t, 1, m1[0].ID)
+	assert.Equal(t, "alice", m1[0].Username)
+	assert.Equal(t, "alice@example.com", m1[0].Email)
+	assert.Equal(t, int64(1), api.listMembersCalls.Load())
+
+	// Second call — cache hit, no new API call.
+	m2, err := svc.LoadMembers(ctx, "l1")
+	require.NoError(t, err)
+	assert.Equal(t, m1, m2)
+	assert.Equal(t, int64(1), api.listMembersCalls.Load(), "second call should hit cache")
+}
+
+func TestTaskService_LoadMembers_Empty(t *testing.T) {
+	api := newFakeAPI()
+	// No members configured — returns empty slice, not an error.
+
+	svc := app.NewTaskService(api)
+	members, err := svc.LoadMembers(context.Background(), "l1")
+	require.NoError(t, err)
+	assert.Empty(t, members)
+}
+
+func TestTaskService_LoadMembers_Error(t *testing.T) {
+	api := newFakeAPI()
+	api.listMembersErr = errors.New("list not found")
+
+	svc := app.NewTaskService(api)
+	_, err := svc.LoadMembers(context.Background(), "l1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "load members")
 }

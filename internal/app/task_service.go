@@ -46,6 +46,7 @@ type TaskDetail struct {
 	StatusColor string
 	Priority    string
 	Assignees   []string
+	AssigneeIDs []int // user IDs corresponding to Assignees, for mutation use
 	Tags        []string
 	DueDate     string
 	StartDate   string
@@ -67,6 +68,35 @@ type StatusOption struct {
 	Type  string
 }
 
+// MemberSummary is a display-oriented view of a list member.
+type MemberSummary struct {
+	ID       int
+	Username string
+	Email    string
+}
+
+// UpdateTaskInput carries the fields that may be mutated on an existing task.
+// Pointer fields are optional; nil means "leave unchanged".
+type UpdateTaskInput struct {
+	Name         *string
+	Description  *string
+	DueDate      *string // epoch ms string, or empty string to clear
+	Priority     *int
+	AssigneesAdd []int
+	AssigneesRem []int
+	Status       *string
+}
+
+// CreateTaskInput carries the fields for creating a new task in a list.
+type CreateTaskInput struct {
+	Name        string
+	Status      string
+	Description string
+	DueDate     string // epoch ms string
+	Priority    int
+	Assignees   []int
+}
+
 // TaskService loads and transforms task data for presentation.
 // It caches results in memory to reduce API calls; caches are invalidated
 // on mutations and can be explicitly evicted for manual refresh.
@@ -78,9 +108,10 @@ type TaskService struct {
 	api ClickUpAPI
 
 	mu              sync.Mutex
-	taskDetailCache map[string]*TaskDetail    // keyed by taskID
-	taskListCache   map[string][]TaskSummary  // keyed by "listID:page"
-	statusCache     map[string][]StatusOption // keyed by listID
+	taskDetailCache map[string]*TaskDetail     // keyed by taskID
+	taskListCache   map[string][]TaskSummary   // keyed by "listID:page"
+	statusCache     map[string][]StatusOption  // keyed by listID
+	memberCache     map[string][]MemberSummary // keyed by listID
 
 	group singleflight.Group
 }
@@ -92,6 +123,7 @@ func NewTaskService(api ClickUpAPI) *TaskService {
 		taskDetailCache: make(map[string]*TaskDetail),
 		taskListCache:   make(map[string][]TaskSummary),
 		statusCache:     make(map[string][]StatusOption),
+		memberCache:     make(map[string][]MemberSummary),
 	}
 }
 
@@ -347,10 +379,114 @@ func (s *TaskService) InvalidateTaskDetail(taskID string) {
 	s.group.Forget("detail:" + taskID)
 }
 
+// UpdateTask updates the writable fields of an existing task and returns an
+// error on failure.  On success the task detail cache for taskID is evicted
+// and all task list cache entries are invalidated, forcing fresh loads.
+func (s *TaskService) UpdateTask(ctx context.Context, taskID string, input UpdateTaskInput) error {
+	req := clickup.UpdateTaskRequest{
+		Name:        input.Name,
+		Description: input.Description,
+		DueDate:     input.DueDate,
+		Priority:    input.Priority,
+		Status:      input.Status,
+	}
+	if len(input.AssigneesAdd) > 0 || len(input.AssigneesRem) > 0 {
+		req.Assignees = &clickup.AssigneeUpdate{
+			Add: input.AssigneesAdd,
+			Rem: input.AssigneesRem,
+		}
+	}
+
+	t, err := s.api.UpdateTask(ctx, taskID, req)
+	if err != nil {
+		return fmt.Errorf("update task: %w", err)
+	}
+	detail := taskToDetail(t)
+
+	s.mu.Lock()
+	listKeys := make([]string, 0, len(s.taskListCache))
+	for key := range s.taskListCache {
+		listKeys = append(listKeys, key)
+	}
+	delete(s.taskDetailCache, taskID)
+	clear(s.taskListCache)
+	s.taskDetailCache[taskID] = detail
+	s.mu.Unlock()
+
+	s.group.Forget("detail:" + taskID)
+	for _, key := range listKeys {
+		s.group.Forget("tasks:" + key)
+	}
+
+	return nil
+}
+
+// CreateTask creates a new task in the given list and returns the new task's ID.
+// On success all task list cache entries for listID are invalidated.
+func (s *TaskService) CreateTask(ctx context.Context, listID string, input CreateTaskInput) (string, error) {
+	req := clickup.CreateTaskRequest{
+		Name:        input.Name,
+		Status:      input.Status,
+		Description: input.Description,
+		DueDate:     input.DueDate,
+		Priority:    input.Priority,
+		Assignees:   input.Assignees,
+	}
+
+	t, err := s.api.CreateTask(ctx, listID, req)
+	if err != nil {
+		return "", fmt.Errorf("create task: %w", err)
+	}
+
+	s.InvalidateTaskList(listID)
+
+	return t.ID, nil
+}
+
+// LoadMembers returns the members of a list.
+// Results are cached by listID; subsequent calls return the cached value.
+func (s *TaskService) LoadMembers(ctx context.Context, listID string) ([]MemberSummary, error) {
+	sfKey := "members:" + listID
+
+	s.mu.Lock()
+	if cached, ok := s.memberCache[listID]; ok {
+		s.mu.Unlock()
+		return cached, nil
+	}
+	s.mu.Unlock()
+
+	v, err, _ := s.group.Do(sfKey, func() (any, error) {
+		members, err := s.api.ListMembers(ctx, listID)
+		if err != nil {
+			return nil, fmt.Errorf("load members: %w", err)
+		}
+		summaries := make([]MemberSummary, len(members))
+		for i, m := range members {
+			summaries[i] = MemberSummary{
+				ID:       m.ID,
+				Username: m.Username,
+				Email:    m.Email,
+			}
+		}
+
+		s.mu.Lock()
+		s.memberCache[listID] = summaries
+		s.mu.Unlock()
+
+		return summaries, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]MemberSummary), nil
+}
+
 func taskToDetail(t *clickup.Task) *TaskDetail {
 	assignees := make([]string, len(t.Assignees))
+	assigneeIDs := make([]int, len(t.Assignees))
 	for i, a := range t.Assignees {
 		assignees[i] = a.Username
+		assigneeIDs[i] = a.ID
 	}
 	tags := make([]string, len(t.Tags))
 	for i, tag := range t.Tags {
@@ -369,11 +505,12 @@ func taskToDetail(t *clickup.Task) *TaskDetail {
 		ID:          t.ID,
 		CustomID:    t.CustomID,
 		Name:        t.Name,
-		Description: truncate(t.Description, 500),
+		Description: strings.TrimSpace(t.Description),
 		Status:      t.Status.Status,
 		StatusColor: t.Status.Color,
 		Priority:    priorityName(t.Priority),
 		Assignees:   assignees,
+		AssigneeIDs: assigneeIDs,
 		Tags:        tags,
 		DueDate:     formatEpochMillis(t.DueDate),
 		StartDate:   formatEpochMillis(t.StartDate),
@@ -490,12 +627,4 @@ func formatEpochMillis(s string) string {
 		return s
 	}
 	return time.UnixMilli(ms).UTC().Format(time.DateOnly)
-}
-
-func truncate(s string, maxLen int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
