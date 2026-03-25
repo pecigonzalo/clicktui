@@ -19,6 +19,23 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "ui_state": {
+      "type": "object",
+      "description": "Persisted UI preferences for a profile.",
+      "properties": {
+        "sort_field": {
+          "type": "string",
+          "enum": ["status", "priority", "due_date", "assignee", "name"],
+          "description": "Task list column to sort by."
+        },
+        "sort_ascending": {
+          "type": "boolean",
+          "description": "Sort direction: true for ascending, false for descending.",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
     "profile": {
       "type": "object",
       "description": "A named profile containing authentication and workspace settings.",
@@ -43,6 +60,10 @@
         "list_id": {
           "type": "string",
           "description": "ClickUp list ID for direct navigation. Requires workspace_id and space_id to also be set."
+        },
+        "ui_state": {
+          "$ref": "#/$defs/ui_state",
+          "description": "Persisted UI preferences for this profile."
         }
       },
       "required": ["name", "auth_method"],

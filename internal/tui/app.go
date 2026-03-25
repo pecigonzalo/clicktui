@@ -49,6 +49,8 @@ type App struct {
 	tviewApp   *tview.Application
 	hierarchy  *app.HierarchyService
 	tasks      *app.TaskService
+	uiState    *app.UIStateService
+	profile    string
 	logger     *slog.Logger
 	pages      *tview.Pages
 	panes      *tview.Flex // column flex holding tree, taskList, taskDetail
@@ -82,11 +84,13 @@ type App struct {
 }
 
 // New creates a TUI application wired to the given services.
-func New(hierarchy *app.HierarchyService, tasks *app.TaskService, logger *slog.Logger, opts LaunchOptions) *App {
+func New(hierarchy *app.HierarchyService, tasks *app.TaskService, uiState *app.UIStateService, profile string, logger *slog.Logger, opts LaunchOptions) *App {
 	a := &App{
 		tviewApp:     tview.NewApplication(),
 		hierarchy:    hierarchy,
 		tasks:        tasks,
+		uiState:      uiState,
+		profile:      profile,
 		logger:       logger,
 		launch:       opts,
 		treeVisible:  true,

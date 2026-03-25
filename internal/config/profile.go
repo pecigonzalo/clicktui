@@ -32,6 +32,15 @@ const (
 	AuthMethodOAuth AuthMethod = "oauth"
 )
 
+// UIState holds persisted UI preferences for a profile.
+type UIState struct {
+	// SortField is the task list column to sort by.
+	// Valid values: "status", "priority", "due_date", "assignee", "name".
+	SortField string `yaml:"sort_field,omitempty" json:"sort_field,omitempty"`
+	// SortAsc controls sort direction: true for ascending, false for descending.
+	SortAsc bool `yaml:"sort_ascending,omitempty" json:"sort_ascending,omitempty"`
+}
+
 // Profile holds per-profile settings including auth method and workspace selection.
 type Profile struct {
 	// Name is the profile identifier.
@@ -45,6 +54,8 @@ type Profile struct {
 	// ListID is an optional ClickUp list ID to navigate to on launch.
 	// Requires WorkspaceID and SpaceID to also be set.
 	ListID string `yaml:"list_id,omitempty" json:"list_id,omitempty"`
+	// UIState holds persisted UI preferences for this profile.
+	UIState UIState `yaml:"ui_state" json:"ui_state"`
 }
 
 // Config is the top-level application configuration.

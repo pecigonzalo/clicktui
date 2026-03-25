@@ -31,15 +31,16 @@ func newBrowseCmd() *cobra.Command {
 
 			hierarchySvc := app.NewHierarchyService(client)
 			taskSvc := app.NewTaskService(client)
+			uiStateSvc := app.NewUIStateService()
 
-			opts := resolveLaunchOptions(workspaceFlag, spaceFlag, listFlag)
+			resolvedProfile, opts := resolveLaunchOptions(profileFlag, workspaceFlag, spaceFlag, listFlag)
 
 			// Initialise icon preset before building any TUI components.
 			if cfg, err := config.Load(); err == nil {
 				tui.InitIcons(cfg.NerdFontEnabled())
 			}
 
-			tuiApp := tui.New(hierarchySvc, taskSvc, logger, opts)
+			tuiApp := tui.New(hierarchySvc, taskSvc, uiStateSvc, resolvedProfile, logger, opts)
 			return tuiApp.Run(cmd.Context())
 		},
 	}
@@ -51,14 +52,28 @@ func newBrowseCmd() *cobra.Command {
 	return cmd
 }
 
-// resolveLaunchOptions merges CLI flags over profile config values. Flags take
-// precedence; when absent, values from the active profile are used.
-func resolveLaunchOptions(workspaceFlag, spaceFlag, listFlag string) tui.LaunchOptions {
+// resolveLaunchOptions determines the active profile name and merges CLI flags
+// over profile config values. The --profile flag takes precedence over
+// active_profile in the config file. CLI flags take precedence over profile
+// defaults for workspace/space/list IDs.
+//
+// It returns the resolved profile name alongside the resolved LaunchOptions.
+func resolveLaunchOptions(profile, workspaceFlag, spaceFlag, listFlag string) (string, tui.LaunchOptions) {
 	var opts tui.LaunchOptions
 
-	// Load profile defaults — errors are non-fatal; the TUI works without them.
+	// Resolve the effective profile name: start with the provided name (which
+	// is already the --profile flag value, defaulting to "default"). Then
+	// check whether the config has an active_profile that should override it
+	// only when the flag was not explicitly set (i.e. still "default").
+	resolvedProfile := profile
 	if cfg, err := config.Load(); err == nil {
-		if p, err := cfg.Active(); err == nil {
+		// If the caller supplied the default sentinel value, let active_profile
+		// in the config take precedence.
+		if resolvedProfile == config.DefaultProfile() && cfg.ActiveProfile != "" {
+			resolvedProfile = cfg.ActiveProfile
+		}
+		// Load workspace/space/list defaults from the resolved profile.
+		if p, err := cfg.Profile(resolvedProfile); err == nil {
 			opts.WorkspaceID = p.WorkspaceID
 			opts.SpaceID = p.SpaceID
 			opts.ListID = p.ListID
@@ -87,5 +102,5 @@ func resolveLaunchOptions(workspaceFlag, spaceFlag, listFlag string) tui.LaunchO
 		opts.ListID = ""
 	}
 
-	return opts
+	return resolvedProfile, opts
 }
