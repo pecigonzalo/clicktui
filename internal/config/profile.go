@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -39,6 +40,23 @@ type UIState struct {
 	SortField string `yaml:"sort_field,omitempty" json:"sort_field,omitempty"`
 	// SortAsc controls sort direction: true for ascending, false for descending.
 	SortAsc bool `yaml:"sort_ascending,omitempty" json:"sort_ascending,omitempty"`
+	// Bookmarks holds the user's locally-stored task bookmarks.
+	Bookmarks []Bookmark `yaml:"bookmarks,omitempty" json:"bookmarks,omitempty"`
+}
+
+// Bookmark records a locally-bookmarked ClickUp task.
+// Bookmarks are stored per-profile in UIState and are never synced to ClickUp.
+type Bookmark struct {
+	// TaskID is the ClickUp task ID.
+	TaskID string `yaml:"task_id" json:"task_id"`
+	// TaskName is the display name of the task at the time it was bookmarked.
+	TaskName string `yaml:"task_name" json:"task_name"`
+	// ListID is the ClickUp list ID that contains the task.
+	ListID string `yaml:"list_id" json:"list_id"`
+	// ListName is the display name of the list at the time it was bookmarked.
+	ListName string `yaml:"list_name" json:"list_name"`
+	// AddedAt is the timestamp when the bookmark was created.
+	AddedAt time.Time `yaml:"added_at" json:"added_at"`
 }
 
 // Profile holds per-profile settings including auth method and workspace selection.

@@ -24,6 +24,35 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "bookmark": {
+      "type": "object",
+      "description": "A locally-stored task bookmark (not synced to ClickUp).",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "description": "ClickUp task ID."
+        },
+        "task_name": {
+          "type": "string",
+          "description": "Display name of the task at the time it was bookmarked."
+        },
+        "list_id": {
+          "type": "string",
+          "description": "ClickUp list ID that contains the task."
+        },
+        "list_name": {
+          "type": "string",
+          "description": "Display name of the list at the time it was bookmarked."
+        },
+        "added_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the bookmark was created."
+        }
+      },
+      "required": ["task_id", "task_name", "list_id", "list_name", "added_at"],
+      "additionalProperties": false
+    },
     "ui_state": {
       "type": "object",
       "description": "Persisted UI preferences for a profile.",
@@ -37,6 +66,13 @@
           "type": "boolean",
           "description": "Sort direction: true for ascending, false for descending.",
           "default": false
+        },
+        "bookmarks": {
+          "type": "array",
+          "description": "Locally-stored task bookmarks for this profile.",
+          "items": {
+            "$ref": "#/$defs/bookmark"
+          }
         }
       },
       "additionalProperties": false
