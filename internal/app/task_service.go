@@ -244,6 +244,71 @@ func (s *TaskService) UpdateTaskStatus(ctx context.Context, taskID, status strin
 	return detail, nil
 }
 
+// MoveTaskToList moves a task to another list and returns refreshed task detail.
+//
+// On success the task detail cache for taskID is replaced with the fresh
+// result, all task list caches are evicted, and status caches for the old/new
+// lists are evicted (status values are list-specific).
+func (s *TaskService) MoveTaskToList(ctx context.Context, workspaceID, taskID, listID string) (*TaskDetail, error) {
+	moved, err := s.api.MoveTaskToList(ctx, workspaceID, taskID, listID)
+	if err != nil {
+		return nil, fmt.Errorf("move task to list: %w", err)
+	}
+
+	// The move endpoint can return a sparse task payload. Fetch full detail so
+	// the detail pane remains fully populated after the move.
+	fresh, err := s.api.Task(ctx, taskID)
+	if err != nil {
+		// Best effort fallback to the move response if immediate refetch fails.
+		fresh = moved
+	}
+	detail := taskToDetail(fresh)
+	// Some move responses omit nested list fields. Keep destination list context
+	// so follow-up list reloads do not attempt an empty list ID.
+	if detail.ListID == "" {
+		detail.ListID = listID
+	}
+	if detail.List == "" {
+		detail.List = listID
+	}
+
+	oldListID := ""
+	newListID := detail.ListID
+	s.mu.Lock()
+	if cached, ok := s.taskDetailCache[taskID]; ok {
+		oldListID = cached.ListID
+	}
+	// Collect list-cache keys before clearing so we can forget their
+	// singleflight entries outside the lock.
+	listKeys := make([]string, 0, len(s.taskListCache))
+	for key := range s.taskListCache {
+		listKeys = append(listKeys, key)
+	}
+	delete(s.taskDetailCache, taskID)
+	clear(s.taskListCache)
+	if oldListID != "" {
+		delete(s.statusCache, oldListID)
+	}
+	if newListID != "" {
+		delete(s.statusCache, newListID)
+	}
+	s.taskDetailCache[taskID] = detail
+	s.mu.Unlock()
+
+	s.group.Forget("detail:" + taskID)
+	for _, key := range listKeys {
+		s.group.Forget("tasks:" + key)
+	}
+	if oldListID != "" {
+		s.group.Forget("statuses:" + oldListID)
+	}
+	if newListID != "" {
+		s.group.Forget("statuses:" + newListID)
+	}
+
+	return detail, nil
+}
+
 // InvalidateTaskList evicts all cached task list pages for listID so the next
 // LoadTasks call fetches fresh data from the API.  Any in-flight singleflight
 // requests for those pages are also forgotten.

@@ -22,6 +22,7 @@ type fakeAPI struct {
 	tasksByID        map[string]*clickup.Task
 	statusesByListID map[string][]clickup.Status
 	updatedTasks     map[string]*clickup.Task // taskID -> result of UpdateTaskStatus
+	movedTasks       map[string]*clickup.Task // taskID -> result of MoveTaskToList
 	teamsErr         error
 	spacesErr        error
 	foldersErr       error
@@ -30,6 +31,7 @@ type fakeAPI struct {
 	taskErr          error
 	listStatusesErr  error
 	updateStatusErr  error
+	moveTaskErr      error
 }
 
 func (f *fakeAPI) Teams(_ context.Context) ([]clickup.Team, error) {
@@ -80,6 +82,26 @@ func (f *fakeAPI) UpdateTaskStatus(_ context.Context, taskID, status string) (*c
 	return &clickup.Task{ID: taskID, Status: clickup.Status{Status: status}}, nil
 }
 
+func (f *fakeAPI) MoveTaskToList(_ context.Context, _ string, taskID, listID string) (*clickup.Task, error) {
+	if f.moveTaskErr != nil {
+		return nil, f.moveTaskErr
+	}
+	if t, ok := f.movedTasks[taskID]; ok {
+		tt := *t
+		f.tasksByID[taskID] = &tt
+		return t, nil
+	}
+	if t, ok := f.tasksByID[taskID]; ok {
+		moved := *t
+		moved.List.ID = listID
+		f.tasksByID[taskID] = &moved
+		return &moved, nil
+	}
+	moved := &clickup.Task{ID: taskID, List: clickup.TaskRef{ID: listID}}
+	f.tasksByID[taskID] = moved
+	return moved, nil
+}
+
 func newFakeAPI() *fakeAPI {
 	return &fakeAPI{
 		spaces:           make(map[string][]clickup.Space),
@@ -89,6 +111,7 @@ func newFakeAPI() *fakeAPI {
 		tasksByID:        make(map[string]*clickup.Task),
 		statusesByListID: make(map[string][]clickup.Status),
 		updatedTasks:     make(map[string]*clickup.Task),
+		movedTasks:       make(map[string]*clickup.Task),
 	}
 }
 

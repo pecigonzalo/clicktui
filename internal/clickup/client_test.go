@@ -368,6 +368,52 @@ func TestUpdateTaskStatus_RateLimit(t *testing.T) {
 	assert.Equal(t, 429, apiErr.StatusCode)
 }
 
+func TestMoveTaskToList_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v3/workspaces/w1/tasks/t1/home_list/l2", r.URL.Path)
+		assert.Equal(t, http.MethodPut, r.Method)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "t1",
+			"name": "Fix login",
+			"list": map[string]any{
+				"id":   "l2",
+				"name": "In Progress",
+			},
+			"status": map[string]any{
+				"status": "open",
+				"color":  "#d3d3d3",
+				"type":   "open",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	task, err := client.MoveTaskToList(context.Background(), "w1", "t1", "l2")
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, "t1", task.ID)
+	assert.Equal(t, "l2", task.List.ID)
+}
+
+func TestMoveTaskToList_InvalidList(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"err":"Invalid list_id value"}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	_, err := client.MoveTaskToList(context.Background(), "w1", "t1", "missing")
+	require.Error(t, err)
+
+	var apiErr *clickup.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 400, apiErr.StatusCode)
+}
+
 func TestTasks_SendsSubtasksParam(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/list/l1/task", r.URL.Path)

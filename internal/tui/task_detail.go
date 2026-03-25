@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,6 +15,7 @@ import (
 )
 
 const pageStatusPicker = "status_picker"
+const pageListPicker = "list_picker"
 
 // ── Field selector types ─────────────────────────────────────────────────────
 
@@ -31,6 +33,13 @@ type selectableField struct {
 	label string    // Display name (e.g., "Task ID", "URL", "Due Date")
 	value string    // Raw copyable value
 	kind  fieldKind // What kind of action is available
+}
+
+type moveListOption struct {
+	WorkspaceID string
+	ID          string
+	Name        string
+	Label       string
 }
 
 // TaskDetailPane shows detailed information about a selected task.
@@ -87,6 +96,11 @@ func (td *TaskDetailPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 		case 's':
 			if td.taskID != "" {
 				td.openStatusPicker()
+				return nil
+			}
+		case 'm':
+			if td.taskID != "" {
+				td.openMoveListPicker()
 				return nil
 			}
 		case 'r':
@@ -267,15 +281,7 @@ func (td *TaskDetailPane) showStatusModal(taskID string, statuses []app.StatusOp
 	dismissModal := func() {
 		td.tuiApp.pages.RemovePage(pageStatusPicker)
 		td.tuiApp.setFocusPane(paneTaskDetail)
-		td.tuiApp.footer.SetHelp(
-			"Tab:next pane",
-			"Shift+Tab:prev pane",
-			"Enter:select",
-			"[:toggle tree",
-			"s:update status",
-			"r:reload",
-			"q:quit",
-		)
+		td.tuiApp.restoreDefaultHelp()
 	}
 
 	for _, s := range statuses {
@@ -361,6 +367,163 @@ func (td *TaskDetailPane) applyStatusUpdate(taskID, status string) {
 
 			// Refresh the task list so the status column reflects the change.
 			td.tuiApp.taskList.refreshCurrentTask(taskID, detail.Status, detail.StatusColor)
+		})
+	}()
+}
+
+// openMoveListPicker collects list targets from the loaded hierarchy and
+// displays a modal to move the current task to another list.
+func (td *TaskDetailPane) openMoveListPicker() {
+	options := td.collectMoveListOptions()
+	if len(options) == 0 {
+		td.tuiApp.setError("no loaded destination lists; expand spaces in the tree first")
+		return
+	}
+	td.showMoveListModal(td.taskID, options)
+}
+
+// collectMoveListOptions returns list destinations discovered in the currently
+// loaded hierarchy tree, excluding the task's current list.
+func (td *TaskDetailPane) collectMoveListOptions() []moveListOption {
+	type localOption struct {
+		workspaceID string
+		id          string
+		name        string
+		label       string
+	}
+	var collected []localOption
+	seen := make(map[string]struct{})
+
+	var walk func(nodes []*app.HierarchyNode, workspaceID string, path []string)
+	walk = func(nodes []*app.HierarchyNode, workspaceID string, path []string) {
+		for _, n := range nodes {
+			switch n.Kind {
+			case app.NodeWorkspace:
+				walk(n.Children, n.ID, append(path, n.Name))
+			case app.NodeSpace, app.NodeFolder:
+				walk(n.Children, workspaceID, append(path, n.Name))
+			case app.NodeList:
+				if workspaceID == "" || n.ID == "" || n.ID == td.listID {
+					continue
+				}
+				if _, ok := seen[n.ID]; ok {
+					continue
+				}
+				seen[n.ID] = struct{}{}
+				labelParts := append(path, n.Name)
+				collected = append(collected, localOption{
+					workspaceID: workspaceID,
+					id:          n.ID,
+					name:        n.Name,
+					label:       strings.Join(labelParts, " / "),
+				})
+			}
+		}
+	}
+
+	walk(td.tuiApp.tree.cachedNodes, "", nil)
+	sort.SliceStable(collected, func(i, j int) bool {
+		return strings.ToLower(collected[i].label) < strings.ToLower(collected[j].label)
+	})
+
+	options := make([]moveListOption, len(collected))
+	for i, o := range collected {
+		options[i] = moveListOption{WorkspaceID: o.workspaceID, ID: o.id, Name: o.name, Label: o.label}
+	}
+	return options
+}
+
+// showMoveListModal renders the move-to-list picker modal over the main layout.
+// Must be called from the UI goroutine.
+func (td *TaskDetailPane) showMoveListModal(taskID string, options []moveListOption) {
+	list := tview.NewList()
+	list.SetBorder(true).
+		SetTitle(" Move Task To List ").
+		SetBorderColor(ColorBorderFocused).
+		SetTitleColor(ColorTitleFocused)
+	list.ShowSecondaryText(true)
+	list.SetMainTextStyle(tcell.StyleDefault.Foreground(ColorDetailValue))
+	list.SetSecondaryTextStyle(tcell.StyleDefault.Foreground(ColorTextMuted))
+
+	dismissModal := func() {
+		td.tuiApp.pages.RemovePage(pageListPicker)
+		td.tuiApp.setFocusPane(paneTaskDetail)
+		td.tuiApp.restoreDefaultHelp()
+	}
+
+	for _, opt := range options {
+		chosenWorkspaceID := opt.WorkspaceID
+		chosenID := opt.ID
+		chosenName := opt.Name
+		main := tview.Escape(opt.Label)
+		secondary := "#" + opt.ID
+		list.AddItem(main, secondary, 0, func() {
+			dismissModal()
+			td.applyMoveToList(chosenWorkspaceID, taskID, chosenID, chosenName)
+		})
+	}
+
+	list.AddItem(
+		tagColor(ColorTextMuted)+"Cancel[-]",
+		"press Esc or Enter to dismiss",
+		0,
+		func() {
+			dismissModal()
+			td.tuiApp.footer.SetStatusReady("Move cancelled")
+		},
+	)
+
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			dismissModal()
+			td.tuiApp.footer.SetStatusReady("Move cancelled")
+			return nil
+		}
+		return event
+	})
+
+	td.tuiApp.footer.SetHelp("Enter:select", "Esc:cancel")
+
+	modalHeight := min(len(options)*2+1*2+4, 30)
+	modal := centreModal(list, 72, modalHeight)
+	td.tuiApp.pages.AddPage(pageListPicker, modal, true, true)
+	td.tuiApp.tviewApp.SetFocus(list)
+}
+
+// applyMoveToList calls the service and refreshes the detail + list panes.
+func (td *TaskDetailPane) applyMoveToList(workspaceID, taskID, listID, listName string) {
+	td.tuiApp.setStatusLoading("Moving task to %q…", listName)
+
+	go func() {
+		detail, err := td.tuiApp.tasks.MoveTaskToList(td.tuiApp.ctx, workspaceID, taskID, listID)
+		td.tuiApp.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				td.tuiApp.logger.Error("move task to list", "workspace", workspaceID, "task", taskID, "list", listID, "error", err)
+				td.tuiApp.setError("move task: %v", err)
+				return
+			}
+
+			movedListID := detail.ListID
+			if movedListID == "" {
+				movedListID = listID
+			}
+			movedListName := detail.List
+			if movedListName == "" {
+				movedListName = listName
+			}
+
+			td.taskID = detail.ID
+			td.listID = movedListID
+			td.taskName = detail.Name
+			detail.ListID = movedListID
+			detail.List = movedListName
+			td.detail = detail
+			td.buildFields(detail)
+			td.render(detail)
+
+			// Reload destination list so the moved task appears in its new home.
+			td.tuiApp.taskList.LoadTasks(movedListID, movedListName)
+			td.tuiApp.footer.SetStatusReady(fmt.Sprintf("Moved to %q", movedListName))
 		})
 	}()
 }

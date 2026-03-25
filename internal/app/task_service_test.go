@@ -398,6 +398,76 @@ func TestTaskService_UpdateTaskStatus_EmptySubtasks(t *testing.T) {
 	assert.Empty(t, detail.Subtasks)
 }
 
+func TestTaskService_MoveTaskToList(t *testing.T) {
+	api := newFakeAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Fix login",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l1", Name: "Backlog"},
+	}
+	api.movedTasks["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Fix login",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l2", Name: "In Progress"},
+	}
+
+	svc := app.NewTaskService(api)
+	detail, err := svc.MoveTaskToList(context.Background(), "w1", "t1", "l2")
+	require.NoError(t, err)
+	require.NotNil(t, detail)
+
+	assert.Equal(t, "t1", detail.ID)
+	assert.Equal(t, "l2", detail.ListID)
+	assert.Equal(t, "In Progress", detail.List)
+}
+
+func TestTaskService_MoveTaskToList_UsesRefetchedDetail(t *testing.T) {
+	api := newFakeAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:          "t1",
+		Name:        "Fix login",
+		Description: "full description",
+		Status:      clickup.Status{Status: "open"},
+		List:        clickup.TaskRef{ID: "l1", Name: "Backlog"},
+	}
+
+	svc := app.NewTaskService(api)
+	detail, err := svc.MoveTaskToList(context.Background(), "w1", "t1", "l2")
+	require.NoError(t, err)
+	require.NotNil(t, detail)
+
+	assert.Equal(t, "full description", detail.Description)
+	assert.Equal(t, "l2", detail.ListID)
+}
+
+func TestTaskService_MoveTaskToList_Error(t *testing.T) {
+	api := newFakeAPI()
+	api.moveTaskErr = &clickup.APIError{StatusCode: 400, Body: `{"err":"Invalid list_id value"}`}
+
+	svc := app.NewTaskService(api)
+	_, err := svc.MoveTaskToList(context.Background(), "w1", "t1", "missing")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "move task to list")
+}
+
+func TestTaskService_MoveTaskToList_FallbackListIDWhenResponseOmitted(t *testing.T) {
+	api := newFakeAPI()
+	api.movedTasks["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Fix login",
+		Status: clickup.Status{Status: "open"},
+		// List intentionally omitted to mimic sparse move response.
+	}
+
+	svc := app.NewTaskService(api)
+	detail, err := svc.MoveTaskToList(context.Background(), "w1", "t1", "l2")
+	require.NoError(t, err)
+	require.NotNil(t, detail)
+	assert.Equal(t, "l2", detail.ListID)
+}
+
 func TestOrderByParent_ParentFollowedByChildren(t *testing.T) {
 	input := []app.TaskSummary{
 		{ID: "p1", Name: "Parent"},
