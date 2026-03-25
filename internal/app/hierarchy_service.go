@@ -22,6 +22,9 @@ type ClickUpAPI interface {
 	ListStatuses(ctx context.Context, listID string) ([]clickup.Status, error)
 	UpdateTaskStatus(ctx context.Context, taskID, status string) (*clickup.Task, error)
 	MoveTaskToList(ctx context.Context, workspaceID, taskID, listID string) (*clickup.Task, error)
+	UpdateTask(ctx context.Context, taskID string, req clickup.UpdateTaskRequest) (*clickup.Task, error)
+	CreateTask(ctx context.Context, listID string, req clickup.CreateTaskRequest) (*clickup.Task, error)
+	ListMembers(ctx context.Context, listID string) ([]clickup.Member, error)
 }
 
 // HierarchyNode represents a single node in the workspace tree.

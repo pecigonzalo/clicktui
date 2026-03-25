@@ -489,3 +489,288 @@ func TestTask_SubtasksEmptyWhenAbsent(t *testing.T) {
 	require.NotNil(t, task)
 	assert.Empty(t, task.Subtasks)
 }
+
+func TestUpdateTask_Success(t *testing.T) {
+	name := "Updated name"
+	desc := "Updated description"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/task/t1", r.URL.Path)
+		assert.Equal(t, http.MethodPut, r.Method)
+
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "Updated name", body["name"])
+		assert.Equal(t, "Updated description", body["description"])
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":          "t1",
+			"name":        "Updated name",
+			"description": "Updated description",
+			"status": map[string]any{
+				"status": "open",
+				"color":  "#d3d3d3",
+				"type":   "open",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	task, err := client.UpdateTask(context.Background(), "t1", clickup.UpdateTaskRequest{
+		Name:        &name,
+		Description: &desc,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, "t1", task.ID)
+	assert.Equal(t, "Updated name", task.Name)
+}
+
+func TestUpdateTask_WithAssignees(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/task/t1", r.URL.Path)
+		assert.Equal(t, http.MethodPut, r.Method)
+
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assignees, ok := body["assignees"].(map[string]any)
+		require.True(t, ok, "assignees field should be an object")
+		add, ok := assignees["add"].([]any)
+		require.True(t, ok)
+		assert.Len(t, add, 1)
+		assert.Equal(t, float64(42), add[0])
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "t1",
+			"name": "Task",
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	task, err := client.UpdateTask(context.Background(), "t1", clickup.UpdateTaskRequest{
+		Assignees: &clickup.AssigneeUpdate{Add: []int{42}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, task)
+}
+
+func TestUpdateTask_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"err":"Task not found"}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	_, err := client.UpdateTask(context.Background(), "missing", clickup.UpdateTaskRequest{})
+	require.Error(t, err)
+
+	var apiErr *clickup.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 404, apiErr.StatusCode)
+}
+
+func TestUpdateTask_Unauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "bad_token", srv)
+	_, err := client.UpdateTask(context.Background(), "t1", clickup.UpdateTaskRequest{})
+	require.Error(t, err)
+
+	var apiErr *clickup.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 401, apiErr.StatusCode)
+}
+
+func TestCreateTask_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/list/l1/task", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "New task", body["name"])
+		assert.Equal(t, "open", body["status"])
+		assert.Equal(t, "Some description", body["description"])
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":          "new-t1",
+			"name":        "New task",
+			"description": "Some description",
+			"status": map[string]any{
+				"status": "open",
+				"color":  "#d3d3d3",
+				"type":   "open",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	task, err := client.CreateTask(context.Background(), "l1", clickup.CreateTaskRequest{
+		Name:        "New task",
+		Status:      "open",
+		Description: "Some description",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, "new-t1", task.ID)
+	assert.Equal(t, "New task", task.Name)
+}
+
+func TestCreateTask_WithAssigneesAndPriority(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/list/l1/task", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, float64(2), body["priority"])
+		assignees, ok := body["assignees"].([]any)
+		require.True(t, ok)
+		assert.Len(t, assignees, 2)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "new-t2",
+			"name": "Assigned task",
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	task, err := client.CreateTask(context.Background(), "l1", clickup.CreateTaskRequest{
+		Name:      "Assigned task",
+		Priority:  2,
+		Assignees: []int{10, 20},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, "new-t2", task.ID)
+}
+
+func TestCreateTask_Unauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "bad_token", srv)
+	_, err := client.CreateTask(context.Background(), "l1", clickup.CreateTaskRequest{Name: "Task"})
+	require.Error(t, err)
+
+	var apiErr *clickup.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 401, apiErr.StatusCode)
+}
+
+func TestCreateTask_RateLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	_, err := client.CreateTask(context.Background(), "l1", clickup.CreateTaskRequest{Name: "Task"})
+	require.Error(t, err)
+
+	var apiErr *clickup.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 429, apiErr.StatusCode)
+}
+
+func TestListMembers_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/list/l1/member", r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"members": []map[string]any{
+				{
+					"id":       1,
+					"username": "alice",
+					"email":    "alice@example.com",
+					"initials": "A",
+				},
+				{
+					"id":       2,
+					"username": "bob",
+					"email":    "bob@example.com",
+					"initials": "B",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	members, err := client.ListMembers(context.Background(), "l1")
+	require.NoError(t, err)
+	require.Len(t, members, 2)
+	assert.Equal(t, 1, members[0].ID)
+	assert.Equal(t, "alice", members[0].Username)
+	assert.Equal(t, "alice@example.com", members[0].Email)
+	assert.Equal(t, "A", members[0].Initials)
+	assert.Equal(t, 2, members[1].ID)
+	assert.Equal(t, "bob", members[1].Username)
+}
+
+func TestListMembers_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/list/l1/member", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"members": []any{},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	members, err := client.ListMembers(context.Background(), "l1")
+	require.NoError(t, err)
+	assert.Empty(t, members)
+}
+
+func TestListMembers_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"err":"List not found"}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "pk_test", srv)
+	_, err := client.ListMembers(context.Background(), "missing")
+	require.Error(t, err)
+
+	var apiErr *clickup.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 404, apiErr.StatusCode)
+}
+
+func TestListMembers_Unauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, "bad_token", srv)
+	_, err := client.ListMembers(context.Background(), "l1")
+	require.Error(t, err)
+
+	var apiErr *clickup.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 401, apiErr.StatusCode)
+}

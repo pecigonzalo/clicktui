@@ -99,3 +99,38 @@ type TaskRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
 }
+
+// Member represents a ClickUp list member.
+type Member struct {
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Initials string `json:"initials"`
+}
+
+// AssigneeUpdate specifies assignees to add or remove in an update request.
+type AssigneeUpdate struct {
+	Add []int `json:"add,omitempty"`
+	Rem []int `json:"rem,omitempty"`
+}
+
+// UpdateTaskRequest carries the fields that can be mutated on an existing task.
+// All fields are optional; omitted fields are left unchanged by the API.
+type UpdateTaskRequest struct {
+	Name        *string         `json:"name,omitempty"`
+	Description *string         `json:"description,omitempty"`
+	DueDate     *string         `json:"due_date,omitempty"` // epoch ms string, or empty to clear
+	Priority    *int            `json:"priority,omitempty"`
+	Assignees   *AssigneeUpdate `json:"assignees,omitempty"`
+	Status      *string         `json:"status,omitempty"`
+}
+
+// CreateTaskRequest carries the fields required and optional when creating a new task.
+type CreateTaskRequest struct {
+	Name        string `json:"name"`
+	Status      string `json:"status,omitempty"`
+	Description string `json:"description,omitempty"`
+	DueDate     string `json:"due_date,omitempty"` // epoch ms string
+	Priority    int    `json:"priority,omitempty"`
+	Assignees   []int  `json:"assignees,omitempty"`
+}

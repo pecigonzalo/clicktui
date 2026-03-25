@@ -21,8 +21,10 @@ type fakeAPI struct {
 	tasks            map[string][]clickup.Task
 	tasksByID        map[string]*clickup.Task
 	statusesByListID map[string][]clickup.Status
+	membersByListID  map[string][]clickup.Member
 	updatedTasks     map[string]*clickup.Task // taskID -> result of UpdateTaskStatus
 	movedTasks       map[string]*clickup.Task // taskID -> result of MoveTaskToList
+	createdTask      *clickup.Task            // result returned by CreateTask
 	teamsErr         error
 	spacesErr        error
 	foldersErr       error
@@ -32,6 +34,9 @@ type fakeAPI struct {
 	listStatusesErr  error
 	updateStatusErr  error
 	moveTaskErr      error
+	updateTaskErr    error
+	createTaskErr    error
+	listMembersErr   error
 }
 
 func (f *fakeAPI) Teams(_ context.Context) ([]clickup.Team, error) {
@@ -102,6 +107,31 @@ func (f *fakeAPI) MoveTaskToList(_ context.Context, _ string, taskID, listID str
 	return moved, nil
 }
 
+func (f *fakeAPI) UpdateTask(_ context.Context, taskID string, _ clickup.UpdateTaskRequest) (*clickup.Task, error) {
+	if f.updateTaskErr != nil {
+		return nil, f.updateTaskErr
+	}
+	if t, ok := f.tasksByID[taskID]; ok {
+		cp := *t
+		return &cp, nil
+	}
+	return &clickup.Task{ID: taskID}, nil
+}
+
+func (f *fakeAPI) CreateTask(_ context.Context, _ string, req clickup.CreateTaskRequest) (*clickup.Task, error) {
+	if f.createTaskErr != nil {
+		return nil, f.createTaskErr
+	}
+	if f.createdTask != nil {
+		return f.createdTask, nil
+	}
+	return &clickup.Task{ID: "new-task", Name: req.Name}, nil
+}
+
+func (f *fakeAPI) ListMembers(_ context.Context, listID string) ([]clickup.Member, error) {
+	return f.membersByListID[listID], f.listMembersErr
+}
+
 func newFakeAPI() *fakeAPI {
 	return &fakeAPI{
 		spaces:           make(map[string][]clickup.Space),
@@ -110,6 +140,7 @@ func newFakeAPI() *fakeAPI {
 		tasks:            make(map[string][]clickup.Task),
 		tasksByID:        make(map[string]*clickup.Task),
 		statusesByListID: make(map[string][]clickup.Status),
+		membersByListID:  make(map[string][]clickup.Member),
 		updatedTasks:     make(map[string]*clickup.Task),
 		movedTasks:       make(map[string]*clickup.Task),
 	}

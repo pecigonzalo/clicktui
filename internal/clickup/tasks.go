@@ -96,3 +96,30 @@ func (c *Client) MoveTaskToList(ctx context.Context, workspaceID, taskID, listID
 	}
 	return &out, nil
 }
+
+// UpdateTask updates the fields of an existing task specified by taskID.
+// Only the fields set in req are sent; omitted fields remain unchanged.
+func (c *Client) UpdateTask(ctx context.Context, taskID string, req UpdateTaskRequest) (*Task, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	var out Task
+	if err := c.doWithBody(ctx, "PUT", fmt.Sprintf("/task/%s", taskID), bytes.NewReader(body), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CreateTask creates a new task in the given list and returns the created task.
+func (c *Client) CreateTask(ctx context.Context, listID string, req CreateTaskRequest) (*Task, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	var out Task
+	if err := c.doWithBody(ctx, "POST", fmt.Sprintf("/list/%s/task", listID), bytes.NewReader(body), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
