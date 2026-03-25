@@ -24,4 +24,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test -short -race -timeout=60s ./...
+      - uses: go-task/setup-task@v1
+        with:
+          version: 3.x
+      - run: task test:race
