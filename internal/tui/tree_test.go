@@ -321,6 +321,92 @@ func TestUpdateNodeText_FolderExpandedToggle(t *testing.T) {
 	}
 }
 
+// ── findNodeByListID ─────────────────────────────────────────────────────────
+
+func TestFindNodeByListID_Found(t *testing.T) {
+	tp := newTestTreePane()
+	root, nodes := buildTestTree()
+	tp.root = root
+
+	// B1a is a NodeList node with ID "B1a" (set by buildTestTree).
+	got := tp.findNodeByListID(root, "B1a")
+	if got == nil {
+		t.Fatal("findNodeByListID should find list node B1a")
+	}
+	if got != nodes["B1a"] {
+		t.Errorf("findNodeByListID returned wrong node")
+	}
+}
+
+func TestFindNodeByListID_NotFound(t *testing.T) {
+	tp := newTestTreePane()
+	root, _ := buildTestTree()
+	tp.root = root
+
+	got := tp.findNodeByListID(root, "nonexistent")
+	if got != nil {
+		t.Error("findNodeByListID should return nil for a missing list ID")
+	}
+}
+
+func TestFindNodeByListID_WrongKind(t *testing.T) {
+	tp := newTestTreePane()
+	root, _ := buildTestTree()
+	tp.root = root
+
+	// "A" exists in the tree but is a NodeFolder, not a NodeList.
+	got := tp.findNodeByListID(root, "A")
+	if got != nil {
+		t.Error("findNodeByListID should not match non-list nodes")
+	}
+}
+
+// ── CollapseToList ────────────────────────────────────────────────────────────
+
+func TestCollapseToList_CollapsesToListPath(t *testing.T) {
+	tp := newTestTreePane()
+	root, nodes := buildTestTree()
+	tp.root = root
+
+	// B1a is a list node; its path is root → B → B1 → B1a.
+	tp.CollapseToList("B1a")
+
+	// Path nodes must remain expanded.
+	if !nodes["B"].IsExpanded() {
+		t.Error("B should stay expanded (on path to B1a)")
+	}
+	if !nodes["B1"].IsExpanded() {
+		t.Error("B1 should stay expanded (on path to B1a)")
+	}
+
+	// Off-path branches should be collapsed.
+	if nodes["A"].IsExpanded() {
+		t.Error("A should be collapsed (not on path to B1a)")
+	}
+	if nodes["C"].IsExpanded() {
+		t.Error("C should be collapsed (not on path to B1a)")
+	}
+	if nodes["B2"].IsExpanded() {
+		t.Error("B2 should be collapsed (sibling of B1)")
+	}
+}
+
+func TestCollapseToList_UnknownID_NoOp(t *testing.T) {
+	tp := newTestTreePane()
+	root, nodes := buildTestTree()
+	tp.root = root
+
+	// An unknown ID should leave the tree untouched.
+	tp.CollapseToList("does-not-exist")
+
+	if !nodes["A"].IsExpanded() {
+		t.Error("A should remain expanded after no-op CollapseToList")
+	}
+	if !nodes["B"].IsExpanded() {
+		t.Error("B should remain expanded after no-op CollapseToList")
+	}
+}
+
 // ── helper ──────────────────────────────────────────────────────────────────
 
 func containsSubstring(s, sub string) bool {

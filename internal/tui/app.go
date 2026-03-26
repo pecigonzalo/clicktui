@@ -585,6 +585,7 @@ func (a *App) doAutoNavToList(ctx context.Context, workspaceID, spaceID, listID 
 
 	a.tviewApp.QueueUpdateDraw(func() {
 		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents)
+		a.tree.CollapseToList(listID)
 		a.taskList.LoadTasks(listID, listName)
 		a.setFocusPane(paneTaskList)
 		a.footer.SetStatusReady("Ready")

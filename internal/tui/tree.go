@@ -360,6 +360,39 @@ func (tp *TreePane) makeTreeNode(n *app.HierarchyNode) *tview.TreeNode {
 		SetSelectable(true)
 }
 
+// CollapseToList finds the tree node for listID and collapses all branches
+// that are not ancestors of that node — the same visual state produced when a
+// user manually selects a list. It is a no-op when a tree filter is active or
+// when no node with the given list ID exists in the current tree.
+// Must be called from the UI goroutine.
+func (tp *TreePane) CollapseToList(listID string) {
+	if tp.app != nil && tp.app.treeFilter != nil && tp.app.treeFilter.IsActive() {
+		return
+	}
+	node := tp.findNodeByListID(tp.root, listID)
+	if node == nil {
+		return
+	}
+	tp.collapseExcept(node)
+}
+
+// findNodeByListID performs a depth-first search of the tview tree starting at
+// node and returns the first tview.TreeNode whose HierarchyNode reference has
+// Kind == NodeList and ID == listID. Returns nil when not found.
+func (tp *TreePane) findNodeByListID(node *tview.TreeNode, listID string) *tview.TreeNode {
+	if ref, ok := node.GetReference().(*app.HierarchyNode); ok {
+		if ref.Kind == app.NodeList && ref.ID == listID {
+			return node
+		}
+	}
+	for _, child := range node.GetChildren() {
+		if found := tp.findNodeByListID(child, listID); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
 // collapseExcept collapses all non-leaf nodes that are not ancestors of the
 // selected node. The root and the direct path from root to selected stay
 // expanded; everything else is collapsed. This is a no-op if the selected
