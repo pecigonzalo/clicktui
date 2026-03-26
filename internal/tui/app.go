@@ -637,6 +637,7 @@ func (a *App) doAutoNavToList(ctx context.Context, workspaceID, spaceID, listID 
 		a.tree.SetSpacesAndExpand(workspaceID, spaces, actualSpaceID, contents, listID)
 		a.taskList.LoadTasks(listID, listName)
 		a.setFocusPane(paneTaskList)
+		a.setTreeVisible(false)
 		a.footer.SetStatusReady("Ready")
 	})
 }
