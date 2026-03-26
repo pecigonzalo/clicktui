@@ -30,6 +30,7 @@ tasks from the terminal.`,
 	root.AddCommand(newConfigCmd())
 	root.AddCommand(newDebugCmd())
 	root.AddCommand(newSnapshotCmd())
+	root.AddCommand(newTaskCmd())
 
 	return root
 }

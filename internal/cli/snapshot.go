@@ -50,7 +50,8 @@ terminal (e.g. CI or agent workflows).`,
 			taskSvc := app.NewTaskService(client)
 			uiStateSvc := app.NewUIStateService()
 
-			resolvedProfile, opts := resolveLaunchOptions(profileFlag, workspaceFlag, spaceFlag, listFlag)
+			profileChanged := cmd.Root().PersistentFlags().Changed("profile")
+			resolvedProfile, opts := resolveLaunchOptions(profileFlag, profileChanged, workspaceFlag, spaceFlag, listFlag)
 
 			// Initialise icon preset before building any TUI components.
 			if cfg, err := config.Load(); err == nil {

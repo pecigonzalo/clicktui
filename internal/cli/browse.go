@@ -33,7 +33,8 @@ func newBrowseCmd() *cobra.Command {
 			taskSvc := app.NewTaskService(client)
 			uiStateSvc := app.NewUIStateService()
 
-			resolvedProfile, opts := resolveLaunchOptions(profileFlag, workspaceFlag, spaceFlag, listFlag)
+			profileChanged := cmd.Root().PersistentFlags().Changed("profile")
+			resolvedProfile, opts := resolveLaunchOptions(profileFlag, profileChanged, workspaceFlag, spaceFlag, listFlag)
 
 			// Initialise icon preset before building any TUI components.
 			if cfg, err := config.Load(); err == nil {
@@ -53,31 +54,18 @@ func newBrowseCmd() *cobra.Command {
 }
 
 // resolveLaunchOptions determines the active profile name and merges CLI flags
-// over profile config values. The --profile flag takes precedence over
-// active_profile in the config file. CLI flags take precedence over profile
-// defaults for workspace/space/list IDs.
+// over profile config values. It is a thin wrapper around ResolveProfile that
+// also merges workspace/space/list flags into the TUI LaunchOptions.
 //
-// It returns the resolved profile name alongside the resolved LaunchOptions.
-func resolveLaunchOptions(profile, workspaceFlag, spaceFlag, listFlag string) (string, tui.LaunchOptions) {
-	var opts tui.LaunchOptions
+// profileChanged must be true when --profile was explicitly provided on the
+// command line (use cmd.Root().PersistentFlags().Changed("profile")).
+func resolveLaunchOptions(profile string, profileChanged bool, workspaceFlag, spaceFlag, listFlag string) (string, tui.LaunchOptions) {
+	defaults := ResolveProfile(profile, profileChanged)
 
-	// Resolve the effective profile name: start with the provided name (which
-	// is already the --profile flag value, defaulting to "default"). Then
-	// check whether the config has an active_profile that should override it
-	// only when the flag was not explicitly set (i.e. still "default").
-	resolvedProfile := profile
-	if cfg, err := config.Load(); err == nil {
-		// If the caller supplied the default sentinel value, let active_profile
-		// in the config take precedence.
-		if resolvedProfile == config.DefaultProfile() && cfg.ActiveProfile != "" {
-			resolvedProfile = cfg.ActiveProfile
-		}
-		// Load workspace/space/list defaults from the resolved profile.
-		if p, err := cfg.Profile(resolvedProfile); err == nil {
-			opts.WorkspaceID = p.WorkspaceID
-			opts.SpaceID = p.SpaceID
-			opts.ListID = p.ListID
-		}
+	opts := tui.LaunchOptions{
+		WorkspaceID: defaults.WorkspaceID,
+		SpaceID:     defaults.SpaceID,
+		ListID:      defaults.ListID,
 	}
 
 	// CLI flags override profile values.
@@ -96,5 +84,5 @@ func resolveLaunchOptions(profile, workspaceFlag, spaceFlag, listFlag string) (s
 		opts.SpaceID = ""
 	}
 
-	return resolvedProfile, opts
+	return defaults.Profile, opts
 }

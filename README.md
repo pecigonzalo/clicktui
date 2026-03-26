@@ -70,6 +70,17 @@ You can navigate directly to a specific location on startup using these flags:
 - `n` — load next page of tasks (task list pane)
 - `q` — quit
 
+## Direct task commands
+
+Run `./bin/clicktui task --help` and subcommand `--help` for available commands
+and flags. Key notes:
+
+- **Profile config**: Set `list_id` and `workspace_id` in your profile to avoid
+  passing them on every invocation.
+- **Status validation**: Status values are list-specific and validated at
+  runtime; invalid values print available options.
+- **Due date format**: Use `YYYY-MM-DD` (e.g., `2026-05-01`).
+
 ## Development / Debugging
 
 Capture a headless TUI snapshot without a real terminal (useful for CI or agent
