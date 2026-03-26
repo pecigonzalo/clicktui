@@ -83,7 +83,9 @@ func ShowInputModal(a *App, cfg InputModalConfig) {
 		SetBorderColor(ColorBorderFocused).
 		SetTitleColor(ColorTitleFocused)
 
-	modal := centreModal(frame, 52, 5)
+	screenW, _ := modalScreenSize(a)
+	modalW := clamp(screenW*60/100, 50, 90)
+	modal := centreModal(frame, modalW, 5)
 
 	a.footer.SetHelp("Enter:confirm", "Esc:cancel")
 	a.SetModalActive(true)

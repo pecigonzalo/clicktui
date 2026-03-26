@@ -142,7 +142,9 @@ func ShowSelectModal(a *App, cfg SelectModalConfig) {
 	height = min(height, 20)
 	height = max(height, 6)
 
-	modal := centreModal(frame, 48, height)
+	screenW, _ := modalScreenSize(a)
+	modalW := clamp(screenW*60/100, 44, 80)
+	modal := centreModal(frame, modalW, height)
 
 	if cfg.Multi {
 		a.footer.SetHelp("Space:toggle", "Enter:confirm", "Esc:cancel")

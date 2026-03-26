@@ -62,8 +62,10 @@ func ShowTextAreaModal(a *App, cfg TextAreaModalConfig) {
 		SetBorderColor(ColorBorderFocused).
 		SetTitleColor(ColorTitleFocused)
 
-	// Size the modal to ~60% of a typical 80-column × 24-row terminal.
-	modal := centreModal(frame, 52, 14)
+	screenW, screenH := modalScreenSize(a)
+	modalW := clamp(screenW*70/100, 60, 110)
+	modalH := clamp(screenH*50/100, 12, 30)
+	modal := centreModal(frame, modalW, modalH)
 
 	a.footer.SetHelp("Ctrl+S:save", "Esc:cancel")
 	a.SetModalActive(true)
