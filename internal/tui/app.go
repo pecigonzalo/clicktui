@@ -35,12 +35,14 @@ const (
 // focusing the task list pane. When only WorkspaceID and SpaceID are set,
 // the TUI expands the space in the tree and focuses the tree pane. When
 // only WorkspaceID is set, the TUI loads spaces for that workspace. When
-// neither is set, the TUI loads all workspaces (default behaviour).
+// only ListID is set, the TUI loads tasks for that list directly and shows a
+// minimal collapsed tree with just that list node. When neither is set, the
+// TUI loads all workspaces (default behaviour).
 type LaunchOptions struct {
 	WorkspaceID string
 	SpaceID     string
 	// ListID is an optional ClickUp list ID to navigate to on launch.
-	// Requires WorkspaceID and SpaceID to also be set.
+	// It may be used standalone for direct-to-list startup.
 	ListID string
 }
 
@@ -454,6 +456,8 @@ func (a *App) Run(ctx context.Context) error {
 		a.footer.SetStatusLoading("Navigating to space…")
 	case a.launch.WorkspaceID != "":
 		a.footer.SetStatusLoading("Loading spaces…")
+	case a.launch.ListID != "":
+		a.footer.SetStatusLoading("Loading list…")
 	default:
 		a.footer.SetStatusLoading("Loading workspaces…")
 	}
@@ -486,9 +490,27 @@ func (a *App) initialLoad(ctx context.Context) {
 		a.doAutoNavToSpace(ctx, a.launch.WorkspaceID, a.launch.SpaceID)
 	case a.launch.WorkspaceID != "":
 		a.doAutoNavToWorkspace(ctx, a.launch.WorkspaceID)
+	case a.launch.ListID != "":
+		a.doLoadListDirect(ctx, a.launch.ListID)
 	default:
 		a.doLoadWorkspaces(ctx)
 	}
+}
+
+// doLoadListDirect loads a list by ID without requiring workspace/space
+// context. The tree is minimized to a single list node and focus moves to the
+// task list pane.
+func (a *App) doLoadListDirect(_ context.Context, listID string) {
+	// No list metadata endpoint is currently exposed by the service layer for a
+	// direct list lookup, so use the list ID as a stable fallback display name.
+	listName := listID
+
+	a.tviewApp.QueueUpdateDraw(func() {
+		a.tree.SetListDirect(listID, listName)
+		a.taskList.LoadTasks(listID, listName)
+		a.setFocusPane(paneTaskList)
+		a.footer.SetStatusReady("Ready")
+	})
 }
 
 // doLoadWorkspaces fetches workspaces and updates the tree. It blocks until the
@@ -557,6 +579,10 @@ func (a *App) doAutoNavToSpace(ctx context.Context, workspaceID, spaceID string)
 // to the task list pane since the user already knows which list they want.
 // The tree remains visible for context. It blocks until all API calls and UI
 // updates are complete.
+//
+// When the list is not found in the given space (e.g. the profile's space_id
+// differs from the list's actual space), it fetches the list metadata to
+// discover the correct space and reloads contents from there.
 func (a *App) doAutoNavToList(ctx context.Context, workspaceID, spaceID, listID string) {
 	spaces, err := a.hierarchy.LoadSpaces(ctx, workspaceID)
 	if err != nil {
@@ -579,12 +605,36 @@ func (a *App) doAutoNavToList(ctx context.Context, workspaceID, spaceID, listID 
 	// Find the list name from the loaded hierarchy so the task list title is
 	// meaningful. Fall back to the raw ID when the list is not found.
 	listName := findListName(contents, listID)
+
+	// If the list was not found in the profile's space, try to discover the
+	// correct space by fetching the list's metadata from the API.
+	actualSpaceID := spaceID
+	if listName == "" {
+		list, err := a.hierarchy.GetList(ctx, listID)
+		if err != nil {
+			a.logger.Error("auto-nav: get list metadata", "list", listID, "error", err)
+			// Fall back gracefully — use the list ID as name and the original space.
+		} else {
+			listName = list.Name
+			if list.Space.ID != "" && list.Space.ID != spaceID {
+				actualSpaceID = list.Space.ID
+				newContents, err := a.hierarchy.LoadSpaceContents(ctx, actualSpaceID)
+				if err != nil {
+					a.logger.Error("auto-nav: load correct space contents", "space", actualSpaceID, "error", err)
+					// Fall back — use original contents.
+				} else {
+					contents = newContents
+				}
+			}
+		}
+	}
+
 	if listName == "" {
 		listName = listID
 	}
 
 	a.tviewApp.QueueUpdateDraw(func() {
-		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents, listID)
+		a.tree.SetSpacesAndExpand(workspaceID, spaces, actualSpaceID, contents, listID)
 		a.taskList.LoadTasks(listID, listName)
 		a.setFocusPane(paneTaskList)
 		a.footer.SetStatusReady("Ready")
