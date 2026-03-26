@@ -334,6 +334,63 @@ func TestRender_NoActionHints(t *testing.T) {
 	}
 }
 
+func TestRenderWithSelector_NoBottomSelectorBlock(t *testing.T) {
+	tdp := newTestDetailPane()
+	d := &app.TaskDetail{
+		ID:       "task1",
+		Name:     "Test",
+		Status:   "open",
+		Priority: "normal",
+		Space:    "S",
+		Folder:   "F",
+		List:     "L",
+	}
+	tdp.detail = d
+	tdp.buildFields(d)
+	tdp.selectedIdx = 0
+	tdp.renderWithSelector()
+
+	stripped := stripTviewTags(tdp.GetText(false))
+	if strings.Contains(stripped, "Select Field") {
+		t.Fatalf("renderWithSelector() should not append selector block; got %q", stripped)
+	}
+}
+
+func TestRenderWithSelector_InlineHighlightOnSelectedField(t *testing.T) {
+	tdp := newTestDetailPane()
+	d := &app.TaskDetail{
+		ID:          "task1",
+		Name:        "Test",
+		Status:      "open",
+		Priority:    "normal",
+		Space:       "S",
+		Folder:      "F",
+		List:        "L",
+		Description: "hello",
+	}
+	tdp.detail = d
+	tdp.buildFields(d)
+
+	selected := -1
+	for i, f := range tdp.fields {
+		if f.label == "Description" {
+			selected = i
+			break
+		}
+	}
+	if selected < 0 {
+		t.Fatal("description field not found in selector fields")
+	}
+
+	tdp.selectedIdx = selected
+	tdp.renderWithSelector()
+
+	stripped := stripTviewTags(tdp.GetText(false))
+	if !strings.Contains(stripped, "> │ hello") {
+		t.Fatalf("renderWithSelector() should inline-highlight selected description row; got %q", stripped)
+	}
+}
+
 // ── inputHandler ─────────────────────────────────────────────────────────────
 
 func TestInputHandler_NonRuneKey_PassesThrough(t *testing.T) {

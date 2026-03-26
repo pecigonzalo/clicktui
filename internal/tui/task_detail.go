@@ -41,7 +41,7 @@ const (
 	editTypeAssignee                 // multi-select assignee picker
 )
 
-// selectableField represents a single field in the selector overlay.
+// selectableField represents a single field in the detail pane.
 type selectableField struct {
 	label    string    // Display name (e.g., "Task ID", "URL", "Due Date")
 	value    string    // Raw copyable value (empty string for placeholder fields)
@@ -204,7 +204,7 @@ func (td *TaskDetailPane) selectorInputHandler(event *tcell.EventKey) *tcell.Eve
 	return event
 }
 
-// enterSelectorMode activates the field selector overlay.
+// enterSelectorMode activates the inline field selector.
 func (td *TaskDetailPane) enterSelectorMode() {
 	td.selectorMode = true
 	td.selectedIdx = 0
@@ -921,27 +921,92 @@ func (td *TaskDetailPane) render(d *app.TaskDetail) {
 	td.renderBody(d, nil)
 }
 
-// renderWithSelector re-renders the detail body with the selector overlay
-// appended at the bottom.
+// renderWithSelector re-renders the detail body with inline selector markers.
 func (td *TaskDetailPane) renderWithSelector() {
 	if td.detail == nil {
 		return
 	}
-	sel := &selectorState{fields: td.fields, idx: td.selectedIdx}
+	sel := &selectorState{idx: td.selectedIdx}
 	td.renderBody(td.detail, sel)
-	td.ScrollToEnd()
 }
 
-// selectorState holds rendering parameters for the field selector overlay.
+// selectorState holds rendering parameters for inline field selection.
 type selectorState struct {
-	fields []selectableField
-	idx    int
+	idx int
 }
 
-// renderBody renders the full detail pane text. When sel is non-nil, the
-// field selector overlay is appended at the bottom.
+type fieldRenderIndex struct {
+	taskID      int
+	customID    int
+	url         int
+	dueDate     int
+	startDate   int
+	parent      int
+	description int
+	assignees   int
+	subtasks    map[string]int
+}
+
+func (td *TaskDetailPane) buildFieldRenderIndex() fieldRenderIndex {
+	idx := fieldRenderIndex{
+		taskID:      -1,
+		customID:    -1,
+		url:         -1,
+		dueDate:     -1,
+		startDate:   -1,
+		parent:      -1,
+		description: -1,
+		assignees:   -1,
+		subtasks:    make(map[string]int),
+	}
+
+	for i, f := range td.fields {
+		switch {
+		case f.label == "Task ID" && f.kind == fieldCopy:
+			idx.taskID = i
+		case f.label == "Custom ID" && f.kind == fieldCopy:
+			idx.customID = i
+		case f.label == "URL" && f.kind == fieldOpen:
+			idx.url = i
+		case f.label == "Due Date" && f.kind == fieldEdit:
+			idx.dueDate = i
+		case f.label == "Start Date" && f.kind == fieldEdit:
+			idx.startDate = i
+		case f.label == "Parent" && f.kind == fieldNavigate:
+			idx.parent = i
+		case f.label == "Description" && f.kind == fieldEdit:
+			idx.description = i
+		case f.label == "Assignees" && f.kind == fieldEdit:
+			idx.assignees = i
+		case f.kind == fieldNavigate && f.value != "":
+			idx.subtasks[f.value] = i
+		}
+	}
+
+	return idx
+}
+
+// renderBody renders the full detail pane text.
+// When sel is non-nil, selectable rows are highlighted inline.
 func (td *TaskDetailPane) renderBody(d *app.TaskDetail, sel *selectorState) {
 	var b strings.Builder
+	idx := td.buildFieldRenderIndex()
+	lineNo := 0
+	selectedLine := -1
+
+	write := func(s string) {
+		b.WriteString(s)
+		lineNo += strings.Count(s, "\n")
+	}
+	writeSelectable := func(fieldIdx int, line string) {
+		prefix := "  "
+		if sel != nil && fieldIdx >= 0 && sel.idx == fieldIdx {
+			prefix = tagColor(ColorSelectorHighlight) + ">[-] "
+			selectedLine = lineNo
+		}
+		b.WriteString(prefix + line + "\n")
+		lineNo++
+	}
 
 	// ── Title block ──────────────────────────────────────────────────────────
 	// Task name in bold white, then ID + custom ID on a muted line.
@@ -952,69 +1017,75 @@ func (td *TaskDetailPane) renderBody(d *app.TaskDetail, sel *selectorState) {
 			titlePrefix = tagColor(ColorStatusLoading) + icons.Bookmark + "[-] "
 		}
 	}
-	fmt.Fprintf(&b, "%s[white::b]%s[-:-:-]\n", titlePrefix, tview.Escape(d.Name))
-
-	idLine := tagColor(ColorTextSubtle) + tview.Escape(d.ID) + "[-]"
+	write(fmt.Sprintf("%s[white::b]%s[-:-:-]\n", titlePrefix, tview.Escape(d.Name)))
+	writeSelectable(idx.taskID, fmt.Sprintf("%s  %s%s[-]", detailLabel("Task ID"), tagColor(ColorTextSubtle), tview.Escape(d.ID)))
 	if d.CustomID != "" {
-		idLine += "  " + tagColor(ColorTextMuted) + tview.Escape(d.CustomID) + "[-]"
+		writeSelectable(idx.customID, fmt.Sprintf("%s  %s%s[-]", detailLabel("Custom ID"), tagColor(ColorTextMuted), tview.Escape(d.CustomID)))
 	}
-	b.WriteString(idLine + "\n\n")
+	write("\n")
 
 	// ── Status & Priority badges ─────────────────────────────────────────────
-	b.WriteString(detailLabel("Status") + "  " + statusBadgeColored(d.Status, d.StatusColor) + "\n")
-	b.WriteString(detailLabel("Priority") + "  " + priorityBadge(d.Priority) + "\n")
+	write(detailLabel("Status") + "  " + statusBadgeColored(d.Status, d.StatusColor) + "\n")
+	write(detailLabel("Priority") + "  " + priorityBadge(d.Priority) + "\n")
 
 	// ── People & Tags ────────────────────────────────────────────────────────
-	if len(d.Assignees) > 0 || len(d.Tags) > 0 {
-		b.WriteString("\n")
-		if len(d.Assignees) > 0 {
-			label := "Assignees"
-			if icons.Assignee != "" {
-				label = icons.Assignee + " " + label
-			}
-			fmt.Fprintf(&b, "%s  %s%s[-]\n",
-				detailLabel(label),
-				tagColor(ColorDetailValue),
-				tview.Escape(strings.Join(d.Assignees, ", ")))
+	if len(d.Assignees) > 0 || len(d.Tags) > 0 || sel != nil {
+		write("\n")
+		assigneeValue := strings.Join(d.Assignees, ", ")
+		if assigneeValue == "" {
+			assigneeValue = "(no assignees)"
 		}
+		assigneeColor := ColorDetailValue
+		if len(d.Assignees) == 0 {
+			assigneeColor = ColorTextMuted
+		}
+		label := "Assignees"
+		if icons.Assignee != "" {
+			label = icons.Assignee + " " + label
+		}
+		writeSelectable(idx.assignees, fmt.Sprintf("%s  %s%s[-]", detailLabel(label), tagColor(assigneeColor), tview.Escape(assigneeValue)))
 		if len(d.Tags) > 0 {
-			label := "Tags"
+			label = "Tags"
 			if icons.Tag != "" {
 				label = icons.Tag + " " + label
 			}
-			fmt.Fprintf(&b, "%s  %s%s[-]\n",
-				detailLabel(label),
-				tagColor(ColorDetailValue),
-				tview.Escape(strings.Join(d.Tags, ", ")))
+			write(fmt.Sprintf("%s  %s%s[-]\n", detailLabel(label), tagColor(ColorDetailValue), tview.Escape(strings.Join(d.Tags, ", "))))
 		}
 	}
 
 	// ── Dates ────────────────────────────────────────────────────────────────
-	hasDates := d.DueDate != "" || d.StartDate != "" || d.DateCreated != "" || d.DateUpdated != ""
+	hasDates := d.DueDate != "" || d.StartDate != "" || d.DateCreated != "" || d.DateUpdated != "" || sel != nil
 	if hasDates {
-		b.WriteString("\n" + sectionHeader("Dates", icons.Calendar) + "\n")
+		write("\n" + sectionHeader("Dates", icons.Calendar) + "\n")
 
 		// Primary dates: Due and Start on their own rows.
-		if d.DueDate != "" {
-			dueDateColor := tagColor(ColorDetailValue)
-			if t, err := time.Parse(time.DateOnly, d.DueDate); err == nil {
-				today := time.Now().Truncate(24 * time.Hour)
-				switch {
-				case t.Before(today):
-					dueDateColor = tagColor(ColorStatusError) // overdue → red
-				case t.Equal(today):
-					dueDateColor = tagColor(ColorStatusLoading) // today → yellow
-				}
+		dueDateColor := tagColor(ColorDetailValue)
+		dueDateText := d.DueDate
+		if dueDateText == "" {
+			dueDateColor = tagColor(ColorTextMuted)
+			dueDateText = "(no date)"
+		} else if t, err := time.Parse(time.DateOnly, d.DueDate); err == nil {
+			today := time.Now().Truncate(24 * time.Hour)
+			switch {
+			case t.Before(today):
+				dueDateColor = tagColor(ColorStatusError) // overdue → red
+			case t.Equal(today):
+				dueDateColor = tagColor(ColorStatusLoading) // today → yellow
 			}
-			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Due"), dueDateColor, d.DueDate)
 		}
-		if d.StartDate != "" {
-			fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel("Start"), tagColor(ColorDetailValue), d.StartDate)
+		writeSelectable(idx.dueDate, fmt.Sprintf("%s  %s%s[-]", detailLabel("Due"), dueDateColor, dueDateText))
+
+		startDateColor := tagColor(ColorDetailValue)
+		startDateText := d.StartDate
+		if startDateText == "" {
+			startDateColor = tagColor(ColorTextMuted)
+			startDateText = "(no date)"
 		}
+		writeSelectable(idx.startDate, fmt.Sprintf("%s  %s%s[-]", detailLabel("Start"), startDateColor, startDateText))
 
 		// Secondary dates: Created/Updated on a single muted line.
 		if d.DateCreated != "" || d.DateUpdated != "" {
-			b.WriteString("\n")
+			write("\n")
 			muted := tagColor(ColorTextMuted)
 			var parts []string
 			if d.DateCreated != "" {
@@ -1023,12 +1094,12 @@ func (td *TaskDetailPane) renderBody(d *app.TaskDetail, sel *selectorState) {
 			if d.DateUpdated != "" {
 				parts = append(parts, "Updated "+d.DateUpdated)
 			}
-			fmt.Fprintf(&b, "%s%s[-]\n", muted, strings.Join(parts, "  ·  "))
+			write(fmt.Sprintf("%s%s[-]\n", muted, strings.Join(parts, "  ·  ")))
 		}
 	}
 
 	// ── Location ─────────────────────────────────────────────────────────────
-	b.WriteString("\n" + sectionHeader("Location", icons.Location) + "\n")
+	write("\n" + sectionHeader("Location", icons.Location) + "\n")
 
 	// Compact breadcrumb: skip empty segments (e.g. hidden folder).
 	sep := " " + icons.Breadcrumb + " "
@@ -1039,23 +1110,17 @@ func (td *TaskDetailPane) renderBody(d *app.TaskDetail, sel *selectorState) {
 		}
 	}
 	if len(segments) > 0 {
-		fmt.Fprintf(&b, "  %s%s[-]\n",
-			tagColor(ColorDetailValue),
-			strings.Join(segments, sep))
+		write(fmt.Sprintf("  %s%s[-]\n", tagColor(ColorDetailValue), strings.Join(segments, sep)))
 	}
 	if d.Parent != "" {
-		fmt.Fprintf(&b, "%s  %s%s %s[-]\n",
-			detailLabel("Parent"),
-			tagColor(ColorDetailValue),
-			icons.ParentPrefix,
-			tview.Escape(d.Parent))
+		writeSelectable(idx.parent, fmt.Sprintf("%s  %s%s %s[-]", detailLabel("Parent"), tagColor(ColorDetailValue), icons.ParentPrefix, tview.Escape(d.Parent)))
 	}
 
 	// ── Subtasks ─────────────────────────────────────────────────────────────
 	if len(d.Subtasks) > 0 {
-		b.WriteString("\n" + sectionHeader(fmt.Sprintf("Subtasks (%d)", len(d.Subtasks)), icons.Subtask) + "\n")
+		write("\n" + sectionHeader(fmt.Sprintf("Subtasks (%d)", len(d.Subtasks)), icons.Subtask) + "\n")
 		for _, st := range d.Subtasks {
-			fmt.Fprintf(&b, "%s%s[-] %s%s[-]  %s  %s%s[-]\n",
+			line := fmt.Sprintf("%s%s[-] %s%s[-]  %s  %s%s[-]",
 				tagColor(ColorDetailValue),
 				icons.SubtaskPrefix,
 				tagColor(ColorTextSubtle),
@@ -1063,98 +1128,48 @@ func (td *TaskDetailPane) renderBody(d *app.TaskDetail, sel *selectorState) {
 				statusBadgeColored(st.Status, st.StatusColor),
 				tagColor(ColorDetailValue),
 				tview.Escape(st.Name))
+			writeSelectable(idx.subtasks[st.ID], line)
 		}
 	}
 
 	// ── URL ──────────────────────────────────────────────────────────────────
 	if d.URL != "" {
-		b.WriteString("\n")
+		write("\n")
 		label := "URL"
 		if icons.Link != "" {
 			label = icons.Link + " " + label
 		}
-		fmt.Fprintf(&b, "%s  %s%s[-]\n", detailLabel(label), tagColor(ColorTextSubtle), d.URL)
+		writeSelectable(idx.url, fmt.Sprintf("%s  %s%s[-]", detailLabel(label), tagColor(ColorTextSubtle), d.URL))
 	}
 
 	// ── Description ──────────────────────────────────────────────────────────
-	if d.Description != "" {
-		b.WriteString("\n" + sectionHeader("Description", icons.Description) + "\n")
+	if d.Description != "" || sel != nil {
+		write("\n" + sectionHeader("Description", icons.Description) + "\n")
 		gutter := tagColor(ColorTextMuted) + "│" + "[-] "
-		for line := range strings.SplitSeq(tview.Escape(d.Description), "\n") {
-			fmt.Fprintf(&b, "%s%s%s[-]\n", gutter, tagColor(ColorDetailValue), line)
-		}
-	}
-
-	// ── Field selector overlay ──────────────────────────────────────────────
-	if sel != nil && len(sel.fields) > 0 {
-		b.WriteString("\n" + tagColor(ColorTextMuted) + "─── Select Field " + strings.Repeat("─", 24) + "[-]\n")
-		for i, f := range sel.fields {
-			td.renderSelectorRow(&b, f, i == sel.idx)
+		firstLine := true
+		if d.Description == "" {
+			writeSelectable(idx.description, fmt.Sprintf("%s%s(no description)[-]", gutter, tagColor(ColorTextMuted)))
+		} else {
+			for line := range strings.SplitSeq(tview.Escape(d.Description), "\n") {
+				rendered := fmt.Sprintf("%s%s%s[-]", gutter, tagColor(ColorDetailValue), line)
+				if firstLine {
+					writeSelectable(idx.description, rendered)
+					firstLine = false
+					continue
+				}
+				write(rendered + "\n")
+			}
 		}
 	}
 
 	td.SetText(b.String())
 	td.ScrollToBeginning()
-}
-
-// renderSelectorRow writes a single field row into b.
-// When selected is true, the row is rendered with a highlight and cursor.
-func (td *TaskDetailPane) renderSelectorRow(b *strings.Builder, f selectableField, selected bool) {
-	const labelWidth = 14 // Pad labels for alignment.
-
-	// Cursor indicator.
-	cursor := "  "
-	if selected {
-		cursor = tagColor(ColorSelectorHighlight) + "> " + "[-]"
-	}
-
-	// Padded label.
-	label := tview.Escape(f.label)
-	if len(f.label) < labelWidth {
-		label += strings.Repeat(" ", labelWidth-len(f.label))
-	}
-
-	// Value display — use placeholder text for empty editable fields.
-	var val string
-	var valColor tcell.Color
-	if !f.hasValue && f.kind == fieldEdit {
-		switch f.edit {
-		case editTypeDate:
-			val = "(no date)"
-		case editTypeTextArea:
-			val = "(no description)"
-		case editTypeAssignee:
-			val = "(no assignees)"
-		default:
-			val = "(none)"
+	if sel != nil && selectedLine >= 0 {
+		_, _, _, innerHeight := td.GetInnerRect()
+		if innerHeight > 0 {
+			top := max(selectedLine-innerHeight/2, 0)
+			td.ScrollTo(top, 0)
 		}
-		valColor = ColorTextMuted
-	} else {
-		val = truncateDisplay(f.value, 48)
-		valColor = ColorDetailValue
-	}
-
-	// Kind hint suffix.
-	var hint string
-	switch f.kind {
-	case fieldOpen:
-		hint = tagColor(ColorTextMuted) + "  [o:open]" + "[-]"
-	case fieldNavigate:
-		hint = tagColor(ColorTextMuted) + "  [↵:go]" + "[-]"
-	case fieldEdit:
-		hint = tagColor(ColorTextMuted) + "  [e:edit]" + "[-]"
-	default:
-		hint = ""
-	}
-
-	if selected {
-		fmt.Fprintf(b, "%s[::r]%s  %s[::- ]%s\n", cursor, label, tview.Escape(val), hint)
-	} else {
-		fmt.Fprintf(b, "%s%s%s[-]  %s%s[-]%s\n",
-			cursor,
-			tagColor(ColorDetailLabel), label,
-			tagColor(valColor), tview.Escape(val),
-			hint)
 	}
 }
 
