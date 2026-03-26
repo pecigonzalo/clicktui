@@ -280,6 +280,9 @@ func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 		case 'y':
 			a.yankID()
 			return nil
+		case 'B':
+			ShowBookmarksOverlay(a)
+			return nil
 		}
 	}
 	return event
