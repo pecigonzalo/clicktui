@@ -80,6 +80,7 @@ func (tp *TreePane) SetSpacesAndExpand(
 	spaces []*app.HierarchyNode,
 	targetSpaceID string,
 	contents []*app.HierarchyNode,
+	collapseToListID string,
 ) {
 	tp.root.ClearChildren()
 	wsNode := &app.HierarchyNode{
@@ -90,6 +91,7 @@ func (tp *TreePane) SetSpacesAndExpand(
 		Children: spaces,
 	}
 	wsTreeNode := tp.makeTreeNode(wsNode)
+	var targetSpaceTreeNode *tview.TreeNode
 
 	for _, s := range spaces {
 		spaceTreeNode := tp.makeTreeNode(s)
@@ -108,7 +110,7 @@ func (tp *TreePane) SetSpacesAndExpand(
 			}
 			spaceTreeNode.SetExpanded(true)
 			tp.updateNodeText(spaceTreeNode, s)
-			tp.SetCurrentNode(spaceTreeNode)
+			targetSpaceTreeNode = spaceTreeNode
 
 			// Update the tree title to show the space name.
 			tp.selected = s.Name
@@ -120,6 +122,22 @@ func (tp *TreePane) SetSpacesAndExpand(
 	tp.updateNodeText(wsTreeNode, wsNode)
 	tp.root.AddChild(wsTreeNode)
 	tp.snapshotNodes()
+
+	if collapseToListID != "" {
+		if listNode := tp.findNodeByListID(tp.root, collapseToListID); listNode != nil {
+			tp.collapseExcept(listNode)
+			tp.SetCurrentNode(listNode)
+			if ref, ok := listNode.GetReference().(*app.HierarchyNode); ok {
+				tp.selected = ref.Name
+				tp.refreshTitle()
+			}
+			return
+		}
+	}
+
+	if targetSpaceTreeNode != nil {
+		tp.SetCurrentNode(targetSpaceTreeNode)
+	}
 }
 
 // refreshTitle updates the pane title to show the selected list context.
@@ -432,6 +450,10 @@ func (tp *TreePane) collapseNonAncestors(node *tview.TreeNode, ancestors map[*tv
 			tp.updateNodeText(node, ref)
 		}
 		return
+	}
+	node.SetExpanded(true)
+	if ref, ok := node.GetReference().(*app.HierarchyNode); ok {
+		tp.updateNodeText(node, ref)
 	}
 	// This node is on the path to the selection — keep it expanded and
 	// recurse so sibling subtrees below it are collapsed.

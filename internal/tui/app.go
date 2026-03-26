@@ -546,7 +546,7 @@ func (a *App) doAutoNavToSpace(ctx context.Context, workspaceID, spaceID string)
 	}
 
 	a.tviewApp.QueueUpdateDraw(func() {
-		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents)
+		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents, "")
 		a.setFocusPane(paneTree)
 		a.footer.SetStatusReady("Ready")
 	})
@@ -584,8 +584,7 @@ func (a *App) doAutoNavToList(ctx context.Context, workspaceID, spaceID, listID 
 	}
 
 	a.tviewApp.QueueUpdateDraw(func() {
-		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents)
-		a.tree.CollapseToList(listID)
+		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents, listID)
 		a.taskList.LoadTasks(listID, listName)
 		a.setFocusPane(paneTaskList)
 		a.footer.SetStatusReady("Ready")

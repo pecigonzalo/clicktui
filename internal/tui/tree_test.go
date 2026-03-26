@@ -407,6 +407,78 @@ func TestCollapseToList_UnknownID_NoOp(t *testing.T) {
 	}
 }
 
+func TestSetSpacesAndExpand_CollapseToList_SelectsListNode(t *testing.T) {
+	tp := newTestTreePane()
+
+	spaces := []*app.HierarchyNode{
+		{ID: "space-a", Name: "Space A", Kind: app.NodeSpace},
+		{ID: "space-b", Name: "Space B", Kind: app.NodeSpace},
+	}
+	contents := []*app.HierarchyNode{
+		{
+			ID:   "folder-1",
+			Name: "Folder 1",
+			Kind: app.NodeFolder,
+			Children: []*app.HierarchyNode{
+				{ID: "list-target", Name: "Target List", Kind: app.NodeList},
+			},
+		},
+		{ID: "list-other", Name: "Other List", Kind: app.NodeList},
+	}
+
+	tp.SetSpacesAndExpand("ws-1", spaces, "space-a", contents, "list-target")
+
+	current := tp.GetCurrentNode()
+	if current == nil {
+		t.Fatal("current node should be set")
+	}
+	ref, ok := current.GetReference().(*app.HierarchyNode)
+	if !ok {
+		t.Fatal("current node should reference a hierarchy node")
+	}
+	if ref.Kind != app.NodeList || ref.ID != "list-target" {
+		t.Fatalf("current node = %v %q, want list %q", ref.Kind, ref.ID, "list-target")
+	}
+
+	if tp.selected != "Target List" {
+		t.Fatalf("selected title context = %q, want %q", tp.selected, "Target List")
+	}
+
+	// The non-target space should be collapsed after collapsing to list path.
+	wsNode := tp.root.GetChildren()[0]
+	spaceANode := wsNode.GetChildren()[0]
+	spaceBNode := wsNode.GetChildren()[1]
+	if !spaceANode.IsExpanded() {
+		t.Error("target space should remain expanded")
+	}
+	if spaceBNode.IsExpanded() {
+		t.Error("non-target space should be collapsed")
+	}
+}
+
+func TestSetSpacesAndExpand_WithoutCollapse_SelectsTargetSpace(t *testing.T) {
+	tp := newTestTreePane()
+
+	spaces := []*app.HierarchyNode{
+		{ID: "space-a", Name: "Space A", Kind: app.NodeSpace},
+	}
+	contents := []*app.HierarchyNode{{ID: "list-1", Name: "List 1", Kind: app.NodeList}}
+
+	tp.SetSpacesAndExpand("ws-1", spaces, "space-a", contents, "")
+
+	current := tp.GetCurrentNode()
+	if current == nil {
+		t.Fatal("current node should be set")
+	}
+	ref, ok := current.GetReference().(*app.HierarchyNode)
+	if !ok {
+		t.Fatal("current node should reference a hierarchy node")
+	}
+	if ref.Kind != app.NodeSpace || ref.ID != "space-a" {
+		t.Fatalf("current node = %v %q, want space %q", ref.Kind, ref.ID, "space-a")
+	}
+}
+
 // ── helper ──────────────────────────────────────────────────────────────────
 
 func containsSubstring(s, sub string) bool {
