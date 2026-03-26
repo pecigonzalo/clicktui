@@ -4,11 +4,13 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/pecigonzalo/clicktui/internal/app"
+	"github.com/pecigonzalo/clicktui/internal/config"
 )
 
 // Sort direction arrows for the pane title indicator.
@@ -183,6 +185,10 @@ func (tlp *TaskListPane) render() {
 			nameText = "  " + icons.SubtaskPrefix + " " + nameText
 			nameColor = ColorTextMuted
 		}
+		// Prepend bookmark indicator when the task is bookmarked.
+		if tlp.isTaskBookmarked(t.ID) {
+			nameText = tagColor(ColorStatusLoading) + icons.Bookmark + "[-] " + nameText
+		}
 		tlp.SetCell(row, 1, tview.NewTableCell(nameText).
 			SetTextColor(nameColor).
 			SetExpansion(8))
@@ -278,6 +284,14 @@ func (tlp *TaskListPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 			tlp.LoadTasks(tlp.currentID, tlp.listName)
 			return nil
 		}
+	case event.Key() == tcell.KeyRune && event.Rune() == 'b':
+		// Toggle bookmark for the currently selected task.
+		row, _ := tlp.GetSelection()
+		idx := row - 1
+		if idx >= 0 && idx < len(tlp.tasks) {
+			tlp.toggleBookmark(tlp.tasks[idx])
+		}
+		return nil
 	}
 	return event
 }
@@ -691,4 +705,48 @@ func (tlp *TaskListPane) loadStatusOrder(listID string) {
 			}
 		})
 	}()
+}
+
+// ── Bookmark helpers ─────────────────────────────────────────────────────────
+
+// isTaskBookmarked reports whether the task with the given ID is bookmarked in
+// the current profile. Returns false when uiState is not available.
+func (tlp *TaskListPane) isTaskBookmarked(taskID string) bool {
+	if tlp.tuiApp == nil || tlp.tuiApp.uiState == nil {
+		return false
+	}
+	return tlp.tuiApp.uiState.IsBookmarked(tlp.tuiApp.profile, taskID)
+}
+
+// toggleBookmark adds or removes a bookmark for t and re-renders the list.
+// Must be called from the UI goroutine.
+func (tlp *TaskListPane) toggleBookmark(t app.TaskSummary) {
+	if tlp.tuiApp == nil || tlp.tuiApp.uiState == nil {
+		return
+	}
+	profile := tlp.tuiApp.profile
+	if tlp.tuiApp.uiState.IsBookmarked(profile, t.ID) {
+		if err := tlp.tuiApp.uiState.RemoveBookmark(profile, t.ID); err != nil {
+			tlp.tuiApp.logger.Error("remove bookmark", "task", t.ID, "error", err)
+			tlp.tuiApp.setError("remove bookmark: %v", err)
+			return
+		}
+		tlp.tuiApp.footer.SetStatusReady("Bookmark removed: " + t.Name)
+	} else {
+		b := config.Bookmark{
+			TaskID:   t.ID,
+			TaskName: t.Name,
+			ListID:   tlp.currentID,
+			ListName: tlp.listName,
+			AddedAt:  time.Now(),
+		}
+		if err := tlp.tuiApp.uiState.AddBookmark(profile, b); err != nil {
+			tlp.tuiApp.logger.Error("add bookmark", "task", t.ID, "error", err)
+			tlp.tuiApp.setError("add bookmark: %v", err)
+			return
+		}
+		tlp.tuiApp.footer.SetStatusReady("Bookmarked: " + t.Name)
+	}
+	// Re-render so the bookmark indicator updates.
+	tlp.render()
 }

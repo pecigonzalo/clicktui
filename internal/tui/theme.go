@@ -177,6 +177,9 @@ type Icons struct {
 	SubtaskPrefix string // ↳ or arrow
 	ParentPrefix  string // ▸ or arrow
 	Breadcrumb    string // › separator
+
+	// Bookmark
+	Bookmark string // ★ or nf-fa-bookmark
 }
 
 var unicodeIcons = Icons{
@@ -202,6 +205,7 @@ var unicodeIcons = Icons{
 	SubtaskPrefix:  "↳",
 	ParentPrefix:   "▸",
 	Breadcrumb:     "›",
+	Bookmark:       "★",
 }
 
 var nerdFontIcons = Icons{
@@ -227,6 +231,7 @@ var nerdFontIcons = Icons{
 	SubtaskPrefix:  "\uf178", //  nf-fa-long_arrow_right
 	ParentPrefix:   "\uf062", //  nf-fa-arrow_up
 	Breadcrumb:     "\ue0b1", //  powerline right arrow
+	Bookmark:       "\uf02e", //  nf-fa-bookmark
 }
 
 // icons is the active icon set. All rendering code reads from this variable.

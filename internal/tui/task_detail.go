@@ -13,6 +13,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/pecigonzalo/clicktui/internal/app"
+	"github.com/pecigonzalo/clicktui/internal/config"
 )
 
 const pageStatusPicker = "status_picker"
@@ -115,6 +116,11 @@ func (td *TaskDetailPane) inputHandler(event *tcell.EventKey) *tcell.EventKey {
 		case 'm':
 			if td.taskID != "" {
 				td.openMoveListPicker()
+				return nil
+			}
+		case 'b':
+			if td.taskID != "" {
+				td.toggleBookmark()
 				return nil
 			}
 		case 'r':
@@ -555,8 +561,46 @@ func (td *TaskDetailPane) applyMoveToList(workspaceID, taskID, listID, listName 
 	}()
 }
 
-// ── Field editing ─────────────────────────────────────────────────────────────
+// ── Bookmark toggle ───────────────────────────────────────────────────────────
 
+// toggleBookmark adds or removes a bookmark for the currently displayed task.
+// Must be called from the UI goroutine.
+func (td *TaskDetailPane) toggleBookmark() {
+	if td.tuiApp == nil || td.tuiApp.uiState == nil {
+		return
+	}
+	profile := td.tuiApp.profile
+	if td.tuiApp.uiState.IsBookmarked(profile, td.taskID) {
+		if err := td.tuiApp.uiState.RemoveBookmark(profile, td.taskID); err != nil {
+			td.tuiApp.logger.Error("remove bookmark", "task", td.taskID, "error", err)
+			td.tuiApp.setError("remove bookmark: %v", err)
+			return
+		}
+		td.tuiApp.footer.SetStatusReady("Bookmark removed: " + td.taskName)
+	} else {
+		b := config.Bookmark{
+			TaskID:   td.taskID,
+			TaskName: td.taskName,
+			ListID:   td.listID,
+			ListName: td.detail.List,
+			AddedAt:  time.Now(),
+		}
+		if err := td.tuiApp.uiState.AddBookmark(profile, b); err != nil {
+			td.tuiApp.logger.Error("add bookmark", "task", td.taskID, "error", err)
+			td.tuiApp.setError("add bookmark: %v", err)
+			return
+		}
+		td.tuiApp.footer.SetStatusReady("Bookmarked: " + td.taskName)
+	}
+	// Re-render so the bookmark indicator in the header updates.
+	if td.detail != nil {
+		td.render(td.detail)
+	}
+	// Also update the task list bookmark indicator.
+	td.tuiApp.taskList.render()
+}
+
+// ── Field editing ─────────────────────────────────────────────────────────────
 // dispatchEdit opens the appropriate editor modal for f.
 // Must be called from the UI goroutine.
 func (td *TaskDetailPane) dispatchEdit(f selectableField) {
@@ -901,7 +945,14 @@ func (td *TaskDetailPane) renderBody(d *app.TaskDetail, sel *selectorState) {
 
 	// ── Title block ──────────────────────────────────────────────────────────
 	// Task name in bold white, then ID + custom ID on a muted line.
-	fmt.Fprintf(&b, "[white::b]%s[-:-:-]\n", tview.Escape(d.Name))
+	// A bookmark indicator is prepended when the task is bookmarked.
+	titlePrefix := ""
+	if td.tuiApp != nil && td.tuiApp.uiState != nil {
+		if td.tuiApp.uiState.IsBookmarked(td.tuiApp.profile, d.ID) {
+			titlePrefix = tagColor(ColorStatusLoading) + icons.Bookmark + "[-] "
+		}
+	}
+	fmt.Fprintf(&b, "%s[white::b]%s[-:-:-]\n", titlePrefix, tview.Escape(d.Name))
 
 	idLine := tagColor(ColorTextSubtle) + tview.Escape(d.ID) + "[-]"
 	if d.CustomID != "" {
