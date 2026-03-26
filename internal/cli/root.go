@@ -29,6 +29,7 @@ tasks from the terminal.`,
 	root.AddCommand(newBrowseCmd())
 	root.AddCommand(newConfigCmd())
 	root.AddCommand(newDebugCmd())
+	root.AddCommand(newSnapshotCmd())
 
 	return root
 }

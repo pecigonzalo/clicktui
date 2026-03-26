@@ -101,3 +101,8 @@ tasks:
     desc: Validate the GoReleaser configuration
     cmds:
       - goreleaser check
+
+  snapshot:
+    desc: Capture a headless TUI snapshot to a file
+    cmds:
+      - go run ./cmd/clicktui snapshot {{.CLI_ARGS}}

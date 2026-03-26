@@ -79,6 +79,9 @@ type Footer struct {
 	*tview.TextView
 	status string
 	help   string
+	// onReady is an optional callback invoked the first time SetStatusReady
+	// is called. Used by headless mode to detect initial load completion.
+	onReady func()
 }
 
 // newFooter creates a Footer TextView ready to be placed in a layout.
@@ -114,9 +117,16 @@ func (f *Footer) SetStatusError(format string, args ...any) {
 }
 
 // SetStatusReady shows a muted ready message in the status segment.
+// On the first call, if an onReady callback is set it is invoked once and
+// then cleared so subsequent calls are a no-op.
 func (f *Footer) SetStatusReady(msg string) {
 	f.status = tagColor(ColorFooterStatus) + tview.Escape(msg) + "[-]"
 	f.refresh()
+	if f.onReady != nil {
+		cb := f.onReady
+		f.onReady = nil
+		cb()
+	}
 }
 
 // SetHelp updates the right (keybinding) segment.  Pass a list of

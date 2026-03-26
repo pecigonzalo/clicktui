@@ -10,7 +10,9 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -658,4 +660,94 @@ func findListName(nodes []*app.HierarchyNode, listID string) string {
 		}
 	}
 	return ""
+}
+
+// RunHeadless starts the TUI on a simulated screen, waits for the initial load
+// to complete (signalled by SetStatusReady), then captures the screen buffer as
+// plain text. This is a development/debugging aid for environments without a
+// real terminal.
+func (a *App) RunHeadless(ctx context.Context, width, height int) (string, error) {
+	sim := tcell.NewSimulationScreen("UTF-8")
+	sim.SetSize(width, height)
+	a.tviewApp.SetScreen(sim)
+
+	// Prepare a channel that SetStatusReady will close via the footer callback.
+	done := make(chan struct{})
+	a.footer.onReady = func() {
+		select {
+		case <-done:
+			// Already closed.
+		default:
+			close(done)
+		}
+	}
+
+	a.ctx = ctx
+
+	// Set the loading status (same logic as Run).
+	switch {
+	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "" && a.launch.ListID != "":
+		a.footer.SetStatusLoading("Navigating to list…")
+	case a.launch.WorkspaceID != "" && a.launch.SpaceID != "":
+		a.footer.SetStatusLoading("Navigating to space…")
+	case a.launch.WorkspaceID != "":
+		a.footer.SetStatusLoading("Loading spaces…")
+	case a.launch.ListID != "":
+		a.footer.SetStatusLoading("Loading list…")
+	default:
+		a.footer.SetStatusLoading("Loading workspaces…")
+	}
+
+	// Run the event loop in a goroutine; initial data load also starts in a
+	// goroutine inside Run's logic — we replicate the launch pattern here.
+	runErr := make(chan error, 1)
+	go a.initialLoad(ctx)
+	go func() { runErr <- a.tviewApp.Run() }()
+
+	// Wait for the ready signal or a timeout/cancellation.
+	select {
+	case <-done:
+		// Allow one extra draw cycle so the screen buffer is fully updated.
+		a.tviewApp.QueueUpdateDraw(func() {})
+	case <-ctx.Done():
+		a.tviewApp.Stop()
+		<-runErr
+		return "", fmt.Errorf("headless run: %w", ctx.Err())
+	}
+
+	// Stop the event loop and wait for it to finish.
+	a.tviewApp.Stop()
+	if err := <-runErr; err != nil {
+		return "", fmt.Errorf("headless run: %w", err)
+	}
+
+	return dumpScreen(sim, width, height), nil
+}
+
+// dumpScreen reads the simulation screen cell buffer and returns the content
+// as a plain-text string with trailing whitespace trimmed from each row.
+func dumpScreen(sim tcell.SimulationScreen, width, height int) string {
+	cells, w, h := sim.GetContents()
+	if w < width {
+		width = w
+	}
+	if h < height {
+		height = h
+	}
+
+	var buf strings.Builder
+	for y := range height {
+		var row strings.Builder
+		for x := range width {
+			cell := cells[y*w+x]
+			if len(cell.Runes) > 0 {
+				row.WriteRune(cell.Runes[0])
+			} else {
+				row.WriteByte(' ')
+			}
+		}
+		buf.WriteString(strings.TrimRight(row.String(), " "))
+		buf.WriteByte('\n')
+	}
+	return buf.String()
 }

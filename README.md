@@ -70,6 +70,16 @@ You can navigate directly to a specific location on startup using these flags:
 - `n` — load next page of tasks (task list pane)
 - `q` — quit
 
+## Development / Debugging
+
+Capture a headless TUI snapshot without a real terminal (useful for CI or agent
+workflows):
+
+```sh
+task snapshot -- --list <list-id>   # writes snapshot.txt
+task snapshot -- --output out.txt --width 200 --height 40
+```
+
 ## Project layout
 
 ```
