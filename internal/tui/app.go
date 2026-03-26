@@ -517,7 +517,8 @@ func (a *App) doLoadListDirect(_ context.Context, listID string) {
 		a.tree.SetListDirect(listID, listName)
 		a.taskList.LoadTasks(listID, listName)
 		a.setFocusPane(paneTaskList)
-		a.footer.SetStatusReady("Ready")
+		// Do not call SetStatusReady here — LoadTasks triggers an async
+		// fetch that calls SetStatusReady once all task pages are loaded.
 	})
 }
 
@@ -645,7 +646,8 @@ func (a *App) doAutoNavToList(ctx context.Context, workspaceID, spaceID, listID 
 		a.tree.SetSpacesAndExpand(workspaceID, spaces, actualSpaceID, contents)
 		a.taskList.LoadTasks(listID, listName)
 		a.setFocusPane(paneTaskList)
-		a.footer.SetStatusReady("Ready")
+		// Do not call SetStatusReady here — LoadTasks triggers an async
+		// fetch that calls SetStatusReady once all task pages are loaded.
 	})
 }
 
@@ -669,8 +671,8 @@ func findListName(nodes []*app.HierarchyNode, listID string) string {
 // real terminal.
 func (a *App) RunHeadless(ctx context.Context, width, height int) (string, error) {
 	sim := tcell.NewSimulationScreen("UTF-8")
-	sim.SetSize(width, height)
-	a.tviewApp.SetScreen(sim)
+	a.tviewApp.SetScreen(sim)  // calls sim.Init() internally
+	sim.SetSize(width, height) // must follow SetScreen so Init doesn't reset size
 
 	// Prepare a channel that SetStatusReady will close via the footer callback.
 	done := make(chan struct{})
@@ -725,13 +727,18 @@ func (a *App) RunHeadless(ctx context.Context, width, height int) (string, error
 		return "", fmt.Errorf("headless run: %w", ctx.Err())
 	}
 
+	// Capture the screen buffer BEFORE stopping the event loop. Stop()
+	// calls screen.Fini() which clears the simulation screen's cell buffer,
+	// so any read after Stop returns an empty result.
+	result := dumpScreen(sim, width, height)
+
 	// Stop the event loop and wait for it to finish.
 	a.tviewApp.Stop()
 	if err := <-runErr; err != nil {
 		return "", fmt.Errorf("headless run: %w", err)
 	}
 
-	return dumpScreen(sim, width, height), nil
+	return result, nil
 }
 
 // dumpScreen reads the simulation screen cell buffer and returns the content
