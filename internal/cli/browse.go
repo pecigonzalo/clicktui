@@ -47,7 +47,7 @@ func newBrowseCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "workspace (team) ID to navigate to on launch")
 	cmd.Flags().StringVar(&spaceFlag, "space", "", "space ID to navigate to on launch (requires --workspace)")
-	cmd.Flags().StringVar(&listFlag, "list", "", "list ID to load tasks for on launch (requires --workspace and --space)")
+	cmd.Flags().StringVar(&listFlag, "list", "", "list ID to load tasks for on launch")
 
 	return cmd
 }
@@ -91,15 +91,9 @@ func resolveLaunchOptions(profile, workspaceFlag, spaceFlag, listFlag string) (s
 		opts.ListID = listFlag
 	}
 
-	// SpaceID without WorkspaceID is meaningless — clear it and any dependent IDs.
+	// SpaceID without WorkspaceID is meaningless — clear it.
 	if opts.WorkspaceID == "" {
 		opts.SpaceID = ""
-		opts.ListID = ""
-	}
-
-	// ListID without SpaceID is meaningless — clear it.
-	if opts.SpaceID == "" {
-		opts.ListID = ""
 	}
 
 	return resolvedProfile, opts

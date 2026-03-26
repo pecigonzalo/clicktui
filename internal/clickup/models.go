@@ -44,6 +44,8 @@ type List struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
 	Statuses []Status `json:"statuses,omitempty"`
+	Space    TaskRef  `json:"space"`
+	Folder   TaskRef  `json:"folder"`
 }
 
 // Status represents a task status in ClickUp.

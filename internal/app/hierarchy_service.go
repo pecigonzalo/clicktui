@@ -17,6 +17,7 @@ type ClickUpAPI interface {
 	Spaces(ctx context.Context, teamID string) ([]clickup.Space, error)
 	Folders(ctx context.Context, spaceID string) ([]clickup.Folder, error)
 	FolderlessLists(ctx context.Context, spaceID string) ([]clickup.List, error)
+	GetList(ctx context.Context, listID string) (*clickup.List, error)
 	Tasks(ctx context.Context, listID string, page int) ([]clickup.Task, error)
 	Task(ctx context.Context, taskID string) (*clickup.Task, error)
 	ListStatuses(ctx context.Context, listID string) ([]clickup.Status, error)
@@ -156,4 +157,15 @@ func (s *HierarchyService) LoadSpaceContents(ctx context.Context, spaceID string
 	}
 
 	return nodes, nil
+}
+
+// GetList fetches metadata for a single list, returning its name and parent
+// space ID. Useful for resolving the correct space when the list is not found
+// in the profile's configured space.
+func (s *HierarchyService) GetList(ctx context.Context, listID string) (*clickup.List, error) {
+	list, err := s.api.GetList(ctx, listID)
+	if err != nil {
+		return nil, fmt.Errorf("get list %s: %w", listID, err)
+	}
+	return list, nil
 }

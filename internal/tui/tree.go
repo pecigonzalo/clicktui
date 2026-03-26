@@ -140,6 +140,25 @@ func (tp *TreePane) SetSpacesAndExpand(
 	}
 }
 
+// SetListDirect builds a minimal tree containing a single list node and
+// selects it. Used when only a list ID is provided without workspace/space
+// context (the --list flag standalone).
+func (tp *TreePane) SetListDirect(listID, listName string) {
+	tp.root.ClearChildren()
+	listNode := &app.HierarchyNode{
+		ID:     listID,
+		Name:   listName,
+		Kind:   app.NodeList,
+		Loaded: true,
+	}
+	child := tp.makeTreeNode(listNode)
+	tp.root.AddChild(child)
+	tp.SetCurrentNode(child)
+	tp.selected = listName
+	tp.refreshTitle()
+	tp.snapshotNodes()
+}
+
 // refreshTitle updates the pane title to show the selected list context.
 // Call after styler is assigned and after selection changes.
 func (tp *TreePane) refreshTitle() {

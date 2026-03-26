@@ -44,3 +44,14 @@ func (c *Client) FolderlessLists(ctx context.Context, spaceID string) ([]List, e
 	}
 	return out.Lists, nil
 }
+
+// GetList returns full metadata for a single list, including its parent space
+// and folder references. This uses the same GET /list/{id} endpoint as
+// ListStatuses but returns the full List object.
+func (c *Client) GetList(ctx context.Context, listID string) (*List, error) {
+	var out List
+	if err := c.do(ctx, "GET", fmt.Sprintf("/list/%s", listID), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

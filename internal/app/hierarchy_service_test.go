@@ -20,6 +20,7 @@ type fakeAPI struct {
 	folderless       map[string][]clickup.List
 	tasks            map[string][]clickup.Task
 	tasksByID        map[string]*clickup.Task
+	listsByID        map[string]*clickup.List
 	statusesByListID map[string][]clickup.Status
 	membersByListID  map[string][]clickup.Member
 	updatedTasks     map[string]*clickup.Task // taskID -> result of UpdateTaskStatus
@@ -31,6 +32,7 @@ type fakeAPI struct {
 	folderlessErr    error
 	tasksErr         error
 	taskErr          error
+	getListErr       error
 	listStatusesErr  error
 	updateStatusErr  error
 	moveTaskErr      error
@@ -53,6 +55,16 @@ func (f *fakeAPI) Folders(_ context.Context, spaceID string) ([]clickup.Folder, 
 
 func (f *fakeAPI) FolderlessLists(_ context.Context, spaceID string) ([]clickup.List, error) {
 	return f.folderless[spaceID], f.folderlessErr
+}
+
+func (f *fakeAPI) GetList(_ context.Context, listID string) (*clickup.List, error) {
+	if f.getListErr != nil {
+		return nil, f.getListErr
+	}
+	if l, ok := f.listsByID[listID]; ok {
+		return l, nil
+	}
+	return nil, errors.New("list not found")
 }
 
 func (f *fakeAPI) Tasks(_ context.Context, listID string, _ int) ([]clickup.Task, error) {
@@ -139,6 +151,7 @@ func newFakeAPI() *fakeAPI {
 		folderless:       make(map[string][]clickup.List),
 		tasks:            make(map[string][]clickup.Task),
 		tasksByID:        make(map[string]*clickup.Task),
+		listsByID:        make(map[string]*clickup.List),
 		statusesByListID: make(map[string][]clickup.Status),
 		membersByListID:  make(map[string][]clickup.Member),
 		updatedTasks:     make(map[string]*clickup.Task),
