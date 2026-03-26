@@ -363,100 +363,7 @@ func TestFindNodeByListID_WrongKind(t *testing.T) {
 
 // ── CollapseToList ────────────────────────────────────────────────────────────
 
-func TestCollapseToList_CollapsesToListPath(t *testing.T) {
-	tp := newTestTreePane()
-	root, nodes := buildTestTree()
-	tp.root = root
-
-	// B1a is a list node; its path is root → B → B1 → B1a.
-	tp.CollapseToList("B1a")
-
-	// Path nodes must remain expanded.
-	if !nodes["B"].IsExpanded() {
-		t.Error("B should stay expanded (on path to B1a)")
-	}
-	if !nodes["B1"].IsExpanded() {
-		t.Error("B1 should stay expanded (on path to B1a)")
-	}
-
-	// Off-path branches should be collapsed.
-	if nodes["A"].IsExpanded() {
-		t.Error("A should be collapsed (not on path to B1a)")
-	}
-	if nodes["C"].IsExpanded() {
-		t.Error("C should be collapsed (not on path to B1a)")
-	}
-	if nodes["B2"].IsExpanded() {
-		t.Error("B2 should be collapsed (sibling of B1)")
-	}
-}
-
-func TestCollapseToList_UnknownID_NoOp(t *testing.T) {
-	tp := newTestTreePane()
-	root, nodes := buildTestTree()
-	tp.root = root
-
-	// An unknown ID should leave the tree untouched.
-	tp.CollapseToList("does-not-exist")
-
-	if !nodes["A"].IsExpanded() {
-		t.Error("A should remain expanded after no-op CollapseToList")
-	}
-	if !nodes["B"].IsExpanded() {
-		t.Error("B should remain expanded after no-op CollapseToList")
-	}
-}
-
-func TestSetSpacesAndExpand_CollapseToList_SelectsListNode(t *testing.T) {
-	tp := newTestTreePane()
-
-	spaces := []*app.HierarchyNode{
-		{ID: "space-a", Name: "Space A", Kind: app.NodeSpace},
-		{ID: "space-b", Name: "Space B", Kind: app.NodeSpace},
-	}
-	contents := []*app.HierarchyNode{
-		{
-			ID:   "folder-1",
-			Name: "Folder 1",
-			Kind: app.NodeFolder,
-			Children: []*app.HierarchyNode{
-				{ID: "list-target", Name: "Target List", Kind: app.NodeList},
-			},
-		},
-		{ID: "list-other", Name: "Other List", Kind: app.NodeList},
-	}
-
-	tp.SetSpacesAndExpand("ws-1", spaces, "space-a", contents, "list-target")
-
-	current := tp.GetCurrentNode()
-	if current == nil {
-		t.Fatal("current node should be set")
-	}
-	ref, ok := current.GetReference().(*app.HierarchyNode)
-	if !ok {
-		t.Fatal("current node should reference a hierarchy node")
-	}
-	if ref.Kind != app.NodeList || ref.ID != "list-target" {
-		t.Fatalf("current node = %v %q, want list %q", ref.Kind, ref.ID, "list-target")
-	}
-
-	if tp.selected != "Target List" {
-		t.Fatalf("selected title context = %q, want %q", tp.selected, "Target List")
-	}
-
-	// The non-target space should be collapsed after collapsing to list path.
-	wsNode := tp.root.GetChildren()[0]
-	spaceANode := wsNode.GetChildren()[0]
-	spaceBNode := wsNode.GetChildren()[1]
-	if !spaceANode.IsExpanded() {
-		t.Error("target space should remain expanded")
-	}
-	if spaceBNode.IsExpanded() {
-		t.Error("non-target space should be collapsed")
-	}
-}
-
-func TestSetSpacesAndExpand_WithoutCollapse_SelectsTargetSpace(t *testing.T) {
+func TestSetSpacesAndExpand_SelectsTargetSpace(t *testing.T) {
 	tp := newTestTreePane()
 
 	spaces := []*app.HierarchyNode{
@@ -464,7 +371,7 @@ func TestSetSpacesAndExpand_WithoutCollapse_SelectsTargetSpace(t *testing.T) {
 	}
 	contents := []*app.HierarchyNode{{ID: "list-1", Name: "List 1", Kind: app.NodeList}}
 
-	tp.SetSpacesAndExpand("ws-1", spaces, "space-a", contents, "")
+	tp.SetSpacesAndExpand("ws-1", spaces, "space-a", contents)
 
 	current := tp.GetCurrentNode()
 	if current == nil {

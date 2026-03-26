@@ -104,6 +104,11 @@ func New(hierarchy *app.HierarchyService, tasks *app.TaskService, uiState *app.U
 		treeMinWidth: 3,
 	}
 	a.buildLayout()
+	// Hide the tree panel immediately when a list is pre-selected so it
+	// never appears before the API calls complete.
+	if opts.ListID != "" {
+		a.setTreeVisible(false)
+	}
 	return a
 }
 
@@ -568,7 +573,7 @@ func (a *App) doAutoNavToSpace(ctx context.Context, workspaceID, spaceID string)
 	}
 
 	a.tviewApp.QueueUpdateDraw(func() {
-		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents, "")
+		a.tree.SetSpacesAndExpand(workspaceID, spaces, spaceID, contents)
 		a.setFocusPane(paneTree)
 		a.footer.SetStatusReady("Ready")
 	})
@@ -634,10 +639,9 @@ func (a *App) doAutoNavToList(ctx context.Context, workspaceID, spaceID, listID 
 	}
 
 	a.tviewApp.QueueUpdateDraw(func() {
-		a.tree.SetSpacesAndExpand(workspaceID, spaces, actualSpaceID, contents, listID)
+		a.tree.SetSpacesAndExpand(workspaceID, spaces, actualSpaceID, contents)
 		a.taskList.LoadTasks(listID, listName)
 		a.setFocusPane(paneTaskList)
-		a.setTreeVisible(false)
 		a.footer.SetStatusReady("Ready")
 	})
 }

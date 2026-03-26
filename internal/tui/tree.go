@@ -80,7 +80,6 @@ func (tp *TreePane) SetSpacesAndExpand(
 	spaces []*app.HierarchyNode,
 	targetSpaceID string,
 	contents []*app.HierarchyNode,
-	collapseToListID string,
 ) {
 	tp.root.ClearChildren()
 	wsNode := &app.HierarchyNode{
@@ -122,18 +121,6 @@ func (tp *TreePane) SetSpacesAndExpand(
 	tp.updateNodeText(wsTreeNode, wsNode)
 	tp.root.AddChild(wsTreeNode)
 	tp.snapshotNodes()
-
-	if collapseToListID != "" {
-		if listNode := tp.findNodeByListID(tp.root, collapseToListID); listNode != nil {
-			tp.collapseExcept(listNode)
-			tp.SetCurrentNode(listNode)
-			if ref, ok := listNode.GetReference().(*app.HierarchyNode); ok {
-				tp.selected = ref.Name
-				tp.refreshTitle()
-			}
-			return
-		}
-	}
 
 	if targetSpaceTreeNode != nil {
 		tp.SetCurrentNode(targetSpaceTreeNode)
@@ -395,22 +382,6 @@ func (tp *TreePane) makeTreeNode(n *app.HierarchyNode) *tview.TreeNode {
 		SetColor(nodeColor(n.Kind)).
 		SetSelectedTextStyle(selStyle).
 		SetSelectable(true)
-}
-
-// CollapseToList finds the tree node for listID and collapses all branches
-// that are not ancestors of that node — the same visual state produced when a
-// user manually selects a list. It is a no-op when a tree filter is active or
-// when no node with the given list ID exists in the current tree.
-// Must be called from the UI goroutine.
-func (tp *TreePane) CollapseToList(listID string) {
-	if tp.app != nil && tp.app.treeFilter != nil && tp.app.treeFilter.IsActive() {
-		return
-	}
-	node := tp.findNodeByListID(tp.root, listID)
-	if node == nil {
-		return
-	}
-	tp.collapseExcept(node)
 }
 
 // findNodeByListID performs a depth-first search of the tview tree starting at
