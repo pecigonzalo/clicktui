@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -707,8 +708,17 @@ func (a *App) RunHeadless(ctx context.Context, width, height int) (string, error
 	// Wait for the ready signal or a timeout/cancellation.
 	select {
 	case <-done:
-		// Allow one extra draw cycle so the screen buffer is fully updated.
-		a.tviewApp.QueueUpdateDraw(func() {})
+		// Ensure the final draw cycle completes so the screen buffer is
+		// fully populated before we read it. QueueUpdateDraw is async —
+		// we block on a channel to guarantee the draw has finished.
+		flushed := make(chan struct{})
+		a.tviewApp.QueueUpdateDraw(func() {
+			close(flushed)
+		})
+		select {
+		case <-flushed:
+		case <-time.After(2 * time.Second):
+		}
 	case <-ctx.Done():
 		a.tviewApp.Stop()
 		<-runErr
