@@ -361,7 +361,7 @@ func TestFindNodeByListID_WrongKind(t *testing.T) {
 	}
 }
 
-// ── CollapseToList ────────────────────────────────────────────────────────────
+// ── SetSpacesAndExpand ────────────────────────────────────────────────────────
 
 func TestSetSpacesAndExpand_SelectsTargetSpace(t *testing.T) {
 	tp := newTestTreePane()

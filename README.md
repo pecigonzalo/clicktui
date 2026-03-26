@@ -51,6 +51,16 @@ Launch the TUI to browse your workspace hierarchy and tasks:
 ./bin/clicktui browse
 ```
 
+### Launch flags
+
+You can navigate directly to a specific location on startup using these flags:
+
+| Flag | Description |
+| --- | --- |
+| `--workspace <id>` | Navigate directly to a workspace on launch |
+| `--space <id>` | Navigate directly to a space (requires `--workspace`) |
+| `--list <id>` | Load a specific list on launch (hides the hierarchy panel) |
+
 **Controls:**
 
 - `Tab`/`Shift+Tab` — cycle between panes (hierarchy, task list, details)
