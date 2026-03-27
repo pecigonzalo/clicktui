@@ -83,11 +83,13 @@ func runTaskMove(
 	cmd *cobra.Command,
 	workspaceID, taskID, listID string,
 ) error {
+	mode, err := resolveOutputMode(cmd)
+	if err != nil {
+		return err
+	}
+
 	if _, err := svc.MoveTaskToList(ctx, workspaceID, taskID, listID); err != nil {
 		return fmt.Errorf("move task: %w", err)
 	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Moved task %s to list %s.\n", taskID, listID); err != nil {
-		return fmt.Errorf("write output: %w", err)
-	}
-	return nil
+	return renderTaskMutation(cmd, mode, fmt.Sprintf("Task %s moved to list %s.", taskID, listID), taskID)
 }

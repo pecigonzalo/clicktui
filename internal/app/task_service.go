@@ -16,63 +16,63 @@ import (
 
 // TaskSummary is a display-oriented view of a task for the list pane.
 type TaskSummary struct {
-	ID          string
-	Name        string
-	Status      string
-	StatusColor string // hex color from the API, e.g. "#ff6b6b"; empty when absent
-	Priority    string
-	Parent      string // parent task ID, empty for top-level tasks
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	StatusColor string `json:"status_color"` // hex color from the API, e.g. "#ff6b6b"; empty when absent
+	Priority    string `json:"priority"`
+	Parent      string `json:"parent"` // parent task ID, empty for top-level tasks
 	// Sort-friendly fields below; not rendered directly but used for ordering.
-	DueDate       string // ISO date (YYYY-MM-DD) or empty; sortable as string
-	Assignee      string // first assignee username or empty
-	PriorityOrder int    // 1=urgent, 2=high, 3=normal, 4=low, 0=none (sorts last)
+	DueDate       string `json:"due_date"` // ISO date (YYYY-MM-DD) or empty; sortable as string
+	Assignee      string `json:"assignee"` // first assignee username or empty
+	PriorityOrder int    `json:"-"`        // 1=urgent, 2=high, 3=normal, 4=low, 0=none (sorts last)
 }
 
 // SubtaskSummary is a lightweight summary of a subtask for the detail view.
 type SubtaskSummary struct {
-	ID          string
-	Name        string
-	Status      string
-	StatusColor string // hex color from the API, e.g. "#ff6b6b"; empty when absent
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	StatusColor string `json:"status_color"` // hex color from the API, e.g. "#ff6b6b"; empty when absent
 }
 
 // TaskDetail is a display-oriented view of a single task for the detail pane.
 type TaskDetail struct {
-	ID          string
-	CustomID    string
-	Name        string
-	Description string
-	Status      string
-	StatusColor string
-	Priority    string
-	Assignees   []string
-	AssigneeIDs []int // user IDs corresponding to Assignees, for mutation use
-	Tags        []string
-	DueDate     string
-	StartDate   string
-	DateCreated string
-	DateUpdated string
-	URL         string
-	Parent      string
-	List        string
-	ListID      string
-	Folder      string
-	Space       string
-	Subtasks    []SubtaskSummary
+	ID          string           `json:"id"`
+	CustomID    string           `json:"custom_id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Status      string           `json:"status"`
+	StatusColor string           `json:"status_color"`
+	Priority    string           `json:"priority"`
+	Assignees   []string         `json:"assignees"`
+	AssigneeIDs []int            `json:"assignee_ids"` // user IDs corresponding to Assignees, for mutation use
+	Tags        []string         `json:"tags"`
+	DueDate     string           `json:"due_date"`
+	StartDate   string           `json:"start_date"`
+	DateCreated string           `json:"date_created"`
+	DateUpdated string           `json:"date_updated"`
+	URL         string           `json:"url"`
+	Parent      string           `json:"parent"`
+	List        string           `json:"list"`
+	ListID      string           `json:"list_id"`
+	Folder      string           `json:"folder"`
+	Space       string           `json:"space"`
+	Subtasks    []SubtaskSummary `json:"subtasks"`
 }
 
 // StatusOption is a display-oriented status value for the status picker.
 type StatusOption struct {
-	Name  string
-	Color string
-	Type  string
+	Name  string `json:"name"`
+	Color string `json:"color"`
+	Type  string `json:"type"`
 }
 
 // MemberSummary is a display-oriented view of a list member.
 type MemberSummary struct {
-	ID       int
-	Username string
-	Email    string
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
 }
 
 // UpdateTaskInput carries the fields that may be mutated on an existing task.

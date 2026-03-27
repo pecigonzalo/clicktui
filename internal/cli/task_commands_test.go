@@ -4,6 +4,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -79,6 +80,17 @@ func (f *fakeTaskStatusSvc) UpdateTaskStatus(_ context.Context, taskID, status s
 func newTestCmd(buf *bytes.Buffer) *cobra.Command {
 	cmd := &cobra.Command{Use: "test"}
 	cmd.SetOut(buf)
+	// Register a local "output" flag so resolveOutputMode works in tests.
+	cmd.Flags().String("output", "text", "output format")
+	return cmd
+}
+
+// newTestCmdWithOutput is like newTestCmd but sets the output flag to the given mode.
+func newTestCmdWithOutput(buf *bytes.Buffer, mode string) *cobra.Command {
+	cmd := newTestCmd(buf)
+	if err := cmd.Flags().Set("output", mode); err != nil {
+		panic(fmt.Sprintf("newTestCmdWithOutput: set output flag: %v", err))
+	}
 	return cmd
 }
 
@@ -510,8 +522,8 @@ func TestRunTaskCreate_HappyPath(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "Created task new-task-id.") {
-		t.Errorf("expected 'Created task new-task-id.' in output, got:\n%s", out)
+	if !strings.Contains(out, "Task created: new-task-id") {
+		t.Errorf("expected 'Task created: new-task-id' in output, got:\n%s", out)
 	}
 	if svc.capturedListID != "list-1" {
 		t.Errorf("CreateTask listID = %q, want %q", svc.capturedListID, "list-1")
@@ -606,8 +618,8 @@ func TestRunTaskMove_HappyPath(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "Moved task task-abc to list list-99.") {
-		t.Errorf("expected 'Moved task task-abc to list list-99.' in output, got:\n%s", out)
+	if !strings.Contains(out, "Task task-abc moved to list list-99.") {
+		t.Errorf("expected 'Task task-abc moved to list list-99.' in output, got:\n%s", out)
 	}
 	if svc.capturedWorkspace != "ws-1" {
 		t.Errorf("MoveTaskToList workspaceID = %q, want %q", svc.capturedWorkspace, "ws-1")
@@ -678,8 +690,8 @@ func TestRunTaskUpdate_HappyPath_Name(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "Updated task task-xyz.") {
-		t.Errorf("expected 'Updated task task-xyz.' in output, got:\n%s", out)
+	if !strings.Contains(out, "Task task-xyz updated.") {
+		t.Errorf("expected 'Task task-xyz updated.' in output, got:\n%s", out)
 	}
 	if svc.capturedTaskID != "task-xyz" {
 		t.Errorf("UpdateTask taskID = %q, want %q", svc.capturedTaskID, "task-xyz")
@@ -805,5 +817,224 @@ func TestParseDueDate_EpochMillisValue(t *testing.T) {
 	const want = "1777593600000"
 	if got != want {
 		t.Errorf("parseDueDate(\"2026-05-01\") = %q, want %q", got, want)
+	}
+}
+
+// --- JSON output mode tests ---
+
+func TestRunTaskList_JSONMode(t *testing.T) {
+	svc := &fakeTaskListSvc{
+		tasks: map[string][]app.TaskSummary{
+			"l1:0": {
+				{ID: "t1", Name: "Fix login", Status: "open", Priority: "high", DueDate: "2026-04-01"},
+				{ID: "t2", Name: "Update docs", Status: "in progress", Priority: "none"},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := newTestCmdWithOutput(&buf, "json")
+
+	if err := runTaskList(context.Background(), svc, cmd, "l1", 0, false); err != nil {
+		t.Fatalf("runTaskList() error = %v", err)
+	}
+
+	var got []app.TaskSummary
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(got))
+	}
+	if got[0].ID != "t1" {
+		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "t1")
+	}
+	if got[1].ID != "t2" {
+		t.Errorf("got[1].ID = %q, want %q", got[1].ID, "t2")
+	}
+}
+
+func TestRunTaskList_JSONMode_EmptySlice(t *testing.T) {
+	svc := &fakeTaskListSvc{
+		tasks: map[string][]app.TaskSummary{},
+	}
+
+	var buf bytes.Buffer
+	cmd := newTestCmdWithOutput(&buf, "json")
+
+	if err := runTaskList(context.Background(), svc, cmd, "l1", 0, false); err != nil {
+		t.Fatalf("runTaskList() error = %v", err)
+	}
+
+	// Should encode as [] not null.
+	trimmed := strings.TrimSpace(buf.String())
+	if trimmed != "[]" {
+		t.Errorf("expected empty JSON array [], got: %s", trimmed)
+	}
+}
+
+func TestRunTaskView_JSONMode(t *testing.T) {
+	svc := &fakeTaskViewSvc{
+		detail: &app.TaskDetail{
+			ID:        "abc123",
+			Name:      "Fix login bug",
+			Status:    "in progress",
+			Priority:  "high",
+			DueDate:   "2026-04-01",
+			Assignees: []string{"alice", "bob"},
+			Tags:      []string{"backend"},
+			URL:       "https://app.clickup.com/t/abc123",
+			List:      "Sprint 12",
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := newTestCmdWithOutput(&buf, "json")
+
+	if err := runTaskView(context.Background(), svc, cmd, "abc123"); err != nil {
+		t.Fatalf("runTaskView() error = %v", err)
+	}
+
+	var got app.TaskDetail
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
+	}
+	if got.ID != "abc123" {
+		t.Errorf("got.ID = %q, want %q", got.ID, "abc123")
+	}
+	if got.Name != "Fix login bug" {
+		t.Errorf("got.Name = %q, want %q", got.Name, "Fix login bug")
+	}
+	if len(got.Assignees) != 2 {
+		t.Errorf("got.Assignees = %v, want 2 items", got.Assignees)
+	}
+}
+
+func TestRunTaskStatus_JSONMode(t *testing.T) {
+	svc := &fakeTaskStatusSvc{
+		detail: &app.TaskDetail{ID: "t1", ListID: "l1"},
+		statuses: []app.StatusOption{
+			{Name: "done"},
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := newTestCmdWithOutput(&buf, "json")
+
+	if err := runTaskStatus(context.Background(), svc, cmd, "t1", "done"); err != nil {
+		t.Fatalf("runTaskStatus() error = %v", err)
+	}
+
+	var got taskMutationResult
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
+	}
+	if !got.OK {
+		t.Errorf("got.OK = false, want true")
+	}
+	if got.ID != "t1" {
+		t.Errorf("got.ID = %q, want %q", got.ID, "t1")
+	}
+}
+
+func TestRunTaskCreate_JSONMode(t *testing.T) {
+	svc := &fakeTaskCreateSvc{taskID: "new-task-id"}
+
+	var buf bytes.Buffer
+	cmd := newTestCmdWithOutput(&buf, "json")
+
+	input := app.CreateTaskInput{Name: "Fix login bug"}
+	if err := runTaskCreate(context.Background(), svc, cmd, "list-1", input); err != nil {
+		t.Fatalf("runTaskCreate() error = %v", err)
+	}
+
+	var got taskMutationResult
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
+	}
+	if !got.OK {
+		t.Errorf("got.OK = false, want true")
+	}
+	if got.ID != "new-task-id" {
+		t.Errorf("got.ID = %q, want %q", got.ID, "new-task-id")
+	}
+}
+
+func TestRunTaskMove_JSONMode(t *testing.T) {
+	svc := &fakeTaskMoveSvc{}
+
+	var buf bytes.Buffer
+	cmd := newTestCmdWithOutput(&buf, "json")
+
+	if err := runTaskMove(context.Background(), svc, cmd, "ws-1", "task-abc", "list-99"); err != nil {
+		t.Fatalf("runTaskMove() error = %v", err)
+	}
+
+	var got taskMutationResult
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
+	}
+	if !got.OK {
+		t.Errorf("got.OK = false, want true")
+	}
+	if got.ID != "task-abc" {
+		t.Errorf("got.ID = %q, want %q", got.ID, "task-abc")
+	}
+}
+
+func TestRunTaskUpdate_JSONMode(t *testing.T) {
+	svc := &fakeTaskUpdateSvc{}
+
+	var buf bytes.Buffer
+	cmd := newTestCmdWithOutput(&buf, "json")
+
+	name := "New title"
+	input := app.UpdateTaskInput{Name: &name}
+
+	if err := runTaskUpdate(context.Background(), svc, cmd, "task-xyz", input); err != nil {
+		t.Fatalf("runTaskUpdate() error = %v", err)
+	}
+
+	var got taskMutationResult
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
+	}
+	if !got.OK {
+		t.Errorf("got.OK = false, want true")
+	}
+	if got.ID != "task-xyz" {
+		t.Errorf("got.ID = %q, want %q", got.ID, "task-xyz")
+	}
+}
+
+// --- invalid output mode test ---
+
+// fakeTaskCreateSvcCallTracker wraps fakeTaskCreateSvc to verify it was not called.
+type fakeTaskCreateSvcCallTracker struct {
+	called bool
+	taskID string
+}
+
+func (f *fakeTaskCreateSvcCallTracker) CreateTask(_ context.Context, _ string, _ app.CreateTaskInput) (string, error) {
+	f.called = true
+	return f.taskID, nil
+}
+
+func TestRunTaskCreate_InvalidOutputMode_ErrorBeforeServiceCall(t *testing.T) {
+	svc := &fakeTaskCreateSvcCallTracker{taskID: "irrelevant"}
+
+	var buf bytes.Buffer
+	cmd := newTestCmdWithOutput(&buf, "xml") // unsupported format
+
+	input := app.CreateTaskInput{Name: "Task"}
+	err := runTaskCreate(context.Background(), svc, cmd, "list-1", input)
+	if err == nil {
+		t.Fatal("expected error for invalid output mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported output format") {
+		t.Errorf("expected 'unsupported output format' in error, got: %v", err)
+	}
+	if svc.called {
+		t.Error("CreateTask should NOT have been called for invalid output mode")
 	}
 }

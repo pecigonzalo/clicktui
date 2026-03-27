@@ -131,11 +131,13 @@ func runTaskUpdate(
 	taskID string,
 	input app.UpdateTaskInput,
 ) error {
+	mode, err := resolveOutputMode(cmd)
+	if err != nil {
+		return err
+	}
+
 	if err := svc.UpdateTask(ctx, taskID, input); err != nil {
 		return fmt.Errorf("update task: %w", err)
 	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Updated task %s.\n", taskID); err != nil {
-		return fmt.Errorf("write output: %w", err)
-	}
-	return nil
+	return renderTaskMutation(cmd, mode, fmt.Sprintf("Task %s updated.", taskID), taskID)
 }

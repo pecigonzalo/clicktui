@@ -4,7 +4,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -68,6 +67,11 @@ func runTaskList(
 	page int,
 	all bool,
 ) error {
+	mode, err := resolveOutputMode(cmd)
+	if err != nil {
+		return err
+	}
+
 	var tasks []app.TaskSummary
 
 	if all {
@@ -89,30 +93,7 @@ func runTaskList(
 		tasks = loaded
 	}
 
-	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	defer func() {
-		_ = w.Flush() // Flush errors are non-fatal; output is already written
-	}()
-
-	if _, err := fmt.Fprintln(w, "ID\tSTATUS\tPRIORITY\tDUE\tNAME"); err != nil {
-		return err
-	}
-	for _, t := range tasks {
-		name := t.Name
-		if t.Parent != "" {
-			name = "  ↳ " + name
-		}
-		due := t.DueDate
-		if due == "" {
-			due = "-"
-		}
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			t.ID, t.Status, t.Priority, due, name,
-		); err != nil {
-			return err
-		}
-	}
-	return nil
+	return renderTaskSummaries(cmd, mode, tasks)
 }
 
 // taskLister is the subset of app.TaskService used by the list command.

@@ -25,6 +25,12 @@ tasks from the terminal.`,
 		"config profile to use",
 	)
 
+	root.PersistentFlags().StringP(
+		"output", "o",
+		"text",
+		"Output format for task commands (text, json)",
+	)
+
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newBrowseCmd())
 	root.AddCommand(newConfigCmd())

@@ -67,6 +67,11 @@ func runTaskStatus(
 	cmd *cobra.Command,
 	taskID, newStatus string,
 ) error {
+	mode, err := resolveOutputMode(cmd)
+	if err != nil {
+		return err
+	}
+
 	// Fetch the task to discover its list ID.
 	detail, err := svc.LoadTaskDetail(ctx, taskID)
 	if err != nil {
@@ -93,10 +98,7 @@ func runTaskStatus(
 		return fmt.Errorf("update task status: %w", err)
 	}
 
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Task %s status updated to %q.\n", taskID, newStatus); err != nil {
-		return fmt.Errorf("write output: %w", err)
-	}
-	return nil
+	return renderTaskMutation(cmd, mode, fmt.Sprintf("Task %s status updated to %q.", taskID, newStatus), taskID)
 }
 
 // statusValid reports whether name matches one of the available statuses

@@ -104,12 +104,14 @@ func runTaskCreate(
 	listID string,
 	input app.CreateTaskInput,
 ) error {
-	taskID, err := svc.CreateTask(ctx, listID, input)
+	mode, err := resolveOutputMode(cmd)
+	if err != nil {
+		return err
+	}
+
+	id, err := svc.CreateTask(ctx, listID, input)
 	if err != nil {
 		return fmt.Errorf("create task: %w", err)
 	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Created task %s.\n", taskID); err != nil {
-		return fmt.Errorf("write output: %w", err)
-	}
-	return nil
+	return renderTaskMutation(cmd, mode, fmt.Sprintf("Task created: %s", id), id)
 }
