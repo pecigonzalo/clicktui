@@ -3,6 +3,9 @@ package tui
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ── validateDate ──────────────────────────────────────────────────────────────
@@ -19,9 +22,8 @@ func TestValidateDate_ValidDates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateDate(tc.input); err != nil {
-				t.Errorf("validateDate(%q) = %v, want nil", tc.input, err)
-			}
+			t.Parallel()
+			require.NoError(t, validateDate(tc.input))
 		})
 	}
 }
@@ -41,9 +43,8 @@ func TestValidateDate_InvalidFormats(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateDate(tc.input); err == nil {
-				t.Errorf("validateDate(%q) = nil, want non-nil error", tc.input)
-			}
+			t.Parallel()
+			assert.Error(t, validateDate(tc.input))
 		})
 	}
 }
@@ -59,17 +60,9 @@ func TestValidateDate_InvalidCalendarDates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateDate(tc.input); err == nil {
-				t.Errorf("validateDate(%q) = nil, want error for invalid calendar date", tc.input)
-			}
+			t.Parallel()
+			assert.Error(t, validateDate(tc.input))
 		})
-	}
-}
-
-func TestValidateDate_EmptyIsError(t *testing.T) {
-	err := validateDate("")
-	if err == nil {
-		t.Error("validateDate('') = nil, want error")
 	}
 }
 
@@ -87,9 +80,7 @@ func TestDateModal_AllowClear_SubmitsEmpty(t *testing.T) {
 	if cfg.AllowClear {
 		cfg.OnSubmit("")
 	}
-	if submitted != "" {
-		t.Errorf("AllowClear OnSubmit received %q, want empty string", submitted)
-	}
+	assert.Equal(t, "", submitted)
 }
 
 func TestDateModal_OnCancel_Called(t *testing.T) {
@@ -98,7 +89,5 @@ func TestDateModal_OnCancel_Called(t *testing.T) {
 		OnCancel: func() { cancelled = true },
 	}
 	cfg.OnCancel()
-	if !cancelled {
-		t.Error("OnCancel was not called")
-	}
+	assert.True(t, cancelled)
 }

@@ -183,7 +183,7 @@ func TestHierarchyService_LoadWorkspaces_Error(t *testing.T) {
 	svc := app.NewHierarchyService(api)
 	_, err := svc.LoadWorkspaces(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load workspaces")
+	assert.ErrorContains(t, err, "load workspaces")
 }
 
 func TestHierarchyService_LoadSpaces(t *testing.T) {
@@ -267,7 +267,7 @@ func TestHierarchyService_LoadSpaces_Error(t *testing.T) {
 	svc := app.NewHierarchyService(api)
 	_, err := svc.LoadSpaces(context.Background(), "t1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load spaces")
+	assert.ErrorContains(t, err, "load spaces")
 }
 
 func TestHierarchyService_LoadSpaceContents_FoldersError(t *testing.T) {
@@ -277,7 +277,7 @@ func TestHierarchyService_LoadSpaceContents_FoldersError(t *testing.T) {
 	svc := app.NewHierarchyService(api)
 	_, err := svc.LoadSpaceContents(context.Background(), "s1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load folders")
+	assert.ErrorContains(t, err, "load folders")
 }
 
 func TestHierarchyService_LoadSpaceContents_FolderlessError(t *testing.T) {
@@ -289,5 +289,41 @@ func TestHierarchyService_LoadSpaceContents_FolderlessError(t *testing.T) {
 	svc := app.NewHierarchyService(api)
 	_, err := svc.LoadSpaceContents(context.Background(), "s1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load folderless lists")
+	assert.ErrorContains(t, err, "load folderless lists")
+}
+
+func TestHierarchyService_GetList(t *testing.T) {
+	api := newFakeAPI()
+	api.listsByID["l1"] = &clickup.List{ID: "l1", Name: "Backlog", Space: clickup.TaskRef{ID: "s1"}}
+
+	svc := app.NewHierarchyService(api)
+	list, err := svc.GetList(context.Background(), "l1")
+	require.NoError(t, err)
+	require.NotNil(t, list)
+
+	assert.Equal(t, "l1", list.ID)
+	assert.Equal(t, "Backlog", list.Name)
+	assert.Equal(t, "s1", list.Space.ID)
+}
+
+func TestHierarchyService_GetList_NotFound(t *testing.T) {
+	api := newFakeAPI()
+
+	svc := app.NewHierarchyService(api)
+	_, err := svc.GetList(context.Background(), "missing")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "get list missing")
+	assert.ErrorContains(t, err, "list not found")
+}
+
+func TestHierarchyService_GetList_Error(t *testing.T) {
+	api := newFakeAPI()
+	wantErr := errors.New("rate limited")
+	api.getListErr = wantErr
+
+	svc := app.NewHierarchyService(api)
+	_, err := svc.GetList(context.Background(), "l1")
+	require.Error(t, err)
+	require.ErrorIs(t, err, wantErr)
+	assert.ErrorContains(t, err, "get list l1")
 }

@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pecigonzalo/clicktui/internal/app"
 )
@@ -37,11 +39,9 @@ func TestCycleFocusIndex_ForwardWraps(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := cycleFocusIndex(tc.focusIdx, tc.delta, tc.count, true)
-			if got != tc.want {
-				t.Errorf("cycleFocusIndex(%d, %d, %d, true) = %d, want %d",
-					tc.focusIdx, tc.delta, tc.count, got, tc.want)
-			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -58,11 +58,9 @@ func TestCycleFocusIndex_BackwardWraps(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := cycleFocusIndex(tc.focusIdx, -1, 3, true)
-			if got != tc.want {
-				t.Errorf("cycleFocusIndex(%d, -1, 3, true) = %d, want %d",
-					tc.focusIdx, got, tc.want)
-			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -81,11 +79,9 @@ func TestCycleFocusIndex_SkipsTreeWhenHidden(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := cycleFocusIndex(tc.focusIdx, tc.delta, 3, false)
-			if got != tc.want {
-				t.Errorf("cycleFocusIndex(%d, %d, 3, false) = %d, want %d",
-					tc.focusIdx, tc.delta, got, tc.want)
-			}
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -98,9 +94,7 @@ func TestFindListName_FoundAtTopLevel(t *testing.T) {
 		{ID: "list2", Name: "Backlog", Kind: app.NodeList},
 	}
 	got := findListName(nodes, "list2")
-	if got != "Backlog" {
-		t.Errorf("findListName(nodes, 'list2') = %q, want 'Backlog'", got)
-	}
+	assert.Equal(t, "Backlog", got)
 }
 
 func TestFindListName_FoundNested(t *testing.T) {
@@ -115,9 +109,7 @@ func TestFindListName_FoundNested(t *testing.T) {
 		},
 	}
 	got := findListName(nodes, "list-deep")
-	if got != "Deep List" {
-		t.Errorf("findListName(nodes, 'list-deep') = %q, want 'Deep List'", got)
-	}
+	assert.Equal(t, "Deep List", got)
 }
 
 func TestFindListName_NotFound(t *testing.T) {
@@ -125,9 +117,7 @@ func TestFindListName_NotFound(t *testing.T) {
 		{ID: "list1", Name: "Sprint Tasks", Kind: app.NodeList},
 	}
 	got := findListName(nodes, "nonexistent")
-	if got != "" {
-		t.Errorf("findListName(nodes, 'nonexistent') = %q, want empty", got)
-	}
+	assert.Empty(t, got)
 }
 
 func TestFindListName_SkipsNonListNodes(t *testing.T) {
@@ -137,16 +127,12 @@ func TestFindListName_SkipsNonListNodes(t *testing.T) {
 		{ID: "id1", Name: "A Folder", Kind: app.NodeFolder},
 	}
 	got := findListName(nodes, "id1")
-	if got != "" {
-		t.Errorf("findListName should skip non-list nodes, got %q", got)
-	}
+	assert.Empty(t, got)
 }
 
 func TestFindListName_EmptyNodes(t *testing.T) {
 	got := findListName(nil, "anything")
-	if got != "" {
-		t.Errorf("findListName(nil, 'anything') = %q, want empty", got)
-	}
+	assert.Empty(t, got)
 }
 
 func TestFindListName_DeeplyNested(t *testing.T) {
@@ -175,9 +161,7 @@ func TestFindListName_DeeplyNested(t *testing.T) {
 		},
 	}
 	got := findListName(nodes, "deep-list")
-	if got != "Deep List" {
-		t.Errorf("findListName(nodes, 'deep-list') = %q, want 'Deep List'", got)
-	}
+	assert.Equal(t, "Deep List", got)
 }
 
 // ── globalInputHandler — key routing ─────────────────────────────────────────
@@ -200,41 +184,31 @@ func TestGlobalInputHandler_FilterEditingPassesThrough(t *testing.T) {
 	// Tab should normally be consumed, but with filter editing it passes through.
 	event := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
 	result := a.globalInputHandler(event)
-	if result == nil {
-		t.Error("globalInputHandler(Tab) with filter editing should pass through, got nil")
-	}
+	require.NotNil(t, result)
 
 	// 'q' should normally quit, but with filter editing it passes through.
 	qEvent := tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone)
 	result = a.globalInputHandler(qEvent)
-	if result == nil {
-		t.Error("globalInputHandler('q') with filter editing should pass through, got nil")
-	}
+	require.NotNil(t, result)
 }
 
 // ── Modal state management ────────────────────────────────────────────────────
 
 func TestIsModalActive_FalseByDefault(t *testing.T) {
 	a := &App{}
-	if a.IsModalActive() {
-		t.Error("IsModalActive() = true on zero-value App, want false")
-	}
+	assert.False(t, a.IsModalActive())
 }
 
 func TestSetModalActive_True(t *testing.T) {
 	a := &App{}
 	a.SetModalActive(true)
-	if !a.IsModalActive() {
-		t.Error("IsModalActive() = false after SetModalActive(true), want true")
-	}
+	assert.True(t, a.IsModalActive())
 }
 
 func TestSetModalActive_False(t *testing.T) {
 	a := &App{modalActive: true}
 	a.SetModalActive(false)
-	if a.IsModalActive() {
-		t.Error("IsModalActive() = true after SetModalActive(false), want false")
-	}
+	assert.False(t, a.IsModalActive())
 }
 
 func TestGlobalInputHandler_ModalActive_SuppressesAllKeys(t *testing.T) {
@@ -259,10 +233,9 @@ func TestGlobalInputHandler_ModalActive_SuppressesAllKeys(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := a.globalInputHandler(tc.event)
-			if got == nil {
-				t.Errorf("globalInputHandler(%s) with modal active = nil (consumed), want event passed through", tc.name)
-			}
+			require.NotNil(t, got)
 		})
 	}
 }
@@ -272,13 +245,7 @@ func TestGlobalInputHandler_ModalActive_SuppressesAllKeys(t *testing.T) {
 func TestPaneIDConstants_AreSequential(t *testing.T) {
 	// Verify the pane IDs are sequential starting from 0 — the focus cycling
 	// logic depends on this property.
-	if paneTree != 0 {
-		t.Errorf("paneTree = %d, want 0", paneTree)
-	}
-	if paneTaskList != 1 {
-		t.Errorf("paneTaskList = %d, want 1", paneTaskList)
-	}
-	if paneTaskDetail != 2 {
-		t.Errorf("paneTaskDetail = %d, want 2", paneTaskDetail)
-	}
+	assert.Equal(t, paneID(0), paneTree)
+	assert.Equal(t, paneID(1), paneTaskList)
+	assert.Equal(t, paneID(2), paneTaskDetail)
 }

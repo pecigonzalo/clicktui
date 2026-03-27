@@ -364,15 +364,15 @@ func TestNerdFontEnabled_EnvOverride(t *testing.T) {
 		{"env_no_overrides_true", "no", true, false},
 		{"env_FALSE_case_insensitive", "FALSE", true, false},
 		{"env_NO_case_insensitive", "NO", true, false},
+		{"env_unknown_falls_back_to_config_true", "maybe", true, true},
+		{"env_unknown_falls_back_to_config_false", "maybe", false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CLICKTUI_NERD_FONTS", tc.envValue)
 			cfg := &config.Config{NerdFont: tc.configVal}
 			got := cfg.NerdFontEnabled()
-			if got != tc.want {
-				t.Errorf("NerdFontEnabled() = %v, want %v (env=%q, config=%v)", got, tc.want, tc.envValue, tc.configVal)
-			}
+			assert.Equal(t, tc.want, got, "NerdFontEnabled() mismatch (env=%q, config=%v)", tc.envValue, tc.configVal)
 		})
 	}
 }
@@ -391,9 +391,20 @@ func TestNerdFontEnabled_FallsBackToConfig(t *testing.T) {
 			t.Setenv("CLICKTUI_NERD_FONTS", "")
 			cfg := &config.Config{NerdFont: tc.configVal}
 			got := cfg.NerdFontEnabled()
-			if got != tc.configVal {
-				t.Errorf("NerdFontEnabled() = %v, want %v (no env set, config=%v)", got, tc.configVal, tc.configVal)
-			}
+			assert.Equal(t, tc.configVal, got, "NerdFontEnabled() mismatch with no env set")
 		})
 	}
+}
+
+func TestDataDir_FallsBackToConfigDir(t *testing.T) {
+	setConfigDir(t, t.TempDir())
+	t.Setenv("XDG_DATA_HOME", "")
+
+	dataDir, err := config.DataDir()
+	require.NoError(t, err)
+
+	configDir, err := config.ConfigDir()
+	require.NoError(t, err)
+
+	assert.Equal(t, configDir, dataDir)
 }

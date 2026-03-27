@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pecigonzalo/clicktui/internal/app"
 )
@@ -21,6 +23,7 @@ import (
 type fakeTaskListSvc struct {
 	tasks map[string][]app.TaskSummary // keyed by "listID:page"
 	err   error
+	errs  map[string]error // keyed by "listID:page"
 }
 
 func (f *fakeTaskListSvc) LoadTasks(_ context.Context, listID string, page int) ([]app.TaskSummary, error) {
@@ -28,6 +31,11 @@ func (f *fakeTaskListSvc) LoadTasks(_ context.Context, listID string, page int) 
 		return nil, f.err
 	}
 	key := fmt.Sprintf("%s:%d", listID, page)
+	if f.errs != nil {
+		if err, ok := f.errs[key]; ok {
+			return nil, err
+		}
+	}
 	return f.tasks[key], nil
 }
 
@@ -77,7 +85,8 @@ func (f *fakeTaskStatusSvc) UpdateTaskStatus(_ context.Context, taskID, status s
 
 // --- helper: build a cobra.Command whose output goes to a buffer ---
 
-func newTestCmd(buf *bytes.Buffer) *cobra.Command {
+func newTestCmd(t *testing.T, buf *bytes.Buffer) *cobra.Command {
+	t.Helper()
 	cmd := &cobra.Command{Use: "test"}
 	cmd.SetOut(buf)
 	// Register a local "output" flag so resolveOutputMode works in tests.
@@ -86,10 +95,11 @@ func newTestCmd(buf *bytes.Buffer) *cobra.Command {
 }
 
 // newTestCmdWithOutput is like newTestCmd but sets the output flag to the given mode.
-func newTestCmdWithOutput(buf *bytes.Buffer, mode string) *cobra.Command {
-	cmd := newTestCmd(buf)
+func newTestCmdWithOutput(t *testing.T, buf *bytes.Buffer, mode string) *cobra.Command {
+	t.Helper()
+	cmd := newTestCmd(t, buf)
 	if err := cmd.Flags().Set("output", mode); err != nil {
-		panic(fmt.Sprintf("newTestCmdWithOutput: set output flag: %v", err))
+		t.Fatalf("newTestCmdWithOutput: set output flag: %v", err)
 	}
 	return cmd
 }
@@ -107,17 +117,14 @@ func TestRunTaskList_PrintsTable(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
-	if err := runTaskList(context.Background(), svc, cmd, "l1", 0, false); err != nil {
-		t.Fatalf("runTaskList() error = %v", err)
-	}
+	err := runTaskList(context.Background(), svc, cmd, "l1", 0, false)
+	require.NoError(t, err)
 
 	out := buf.String()
 	for _, want := range []string{"t1", "Fix login", "2026-04-01", "STATUS"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("expected %q in output, got:\n%s", want, out)
-		}
+		assert.Contains(t, out, want)
 	}
 }
 
@@ -132,52 +139,55 @@ func TestRunTaskList_SubtaskIndented(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
-	if err := runTaskList(context.Background(), svc, cmd, "l1", 0, false); err != nil {
-		t.Fatalf("runTaskList() error = %v", err)
-	}
+	err := runTaskList(context.Background(), svc, cmd, "l1", 0, false)
+	require.NoError(t, err)
 
 	out := buf.String()
-	if !strings.Contains(out, "↳ Child") {
-		t.Errorf("expected subtask prefix '↳ Child' in output, got:\n%s", out)
-	}
+	assert.Contains(t, out, "↳ Child")
 }
 
 func TestRunTaskList_EmptyDueDate_ShowsDash(t *testing.T) {
 	svc := &fakeTaskListSvc{
 		tasks: map[string][]app.TaskSummary{
 			"l1:0": {
-				{ID: "t1", Name: "No due", Status: "open"},
+				{ID: "t1", Name: "NoDue", Status: "open", Priority: "none"},
 			},
 		},
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
-	if err := runTaskList(context.Background(), svc, cmd, "l1", 0, false); err != nil {
-		t.Fatalf("runTaskList() error = %v", err)
-	}
+	cmd := newTestCmd(t, &buf)
+	err := runTaskList(context.Background(), svc, cmd, "l1", 0, false)
+	require.NoError(t, err)
 
 	// The DUE column should show "-" when DueDate is empty.
-	if !strings.Contains(buf.String(), "-") {
-		t.Errorf("expected '-' for missing due date, got:\n%s", buf.String())
+	var taskLine string
+	for line := range strings.SplitSeq(buf.String(), "\n") {
+		if strings.Contains(line, "t1") {
+			taskLine = line
+			break
+		}
 	}
+	require.NotEmpty(t, taskLine)
+	fields := strings.Fields(taskLine)
+	require.GreaterOrEqual(t, len(fields), 5)
+	assert.Equal(t, "t1", fields[0])
+	assert.Equal(t, "-", fields[3])
 }
 
 func TestRunTaskList_ServiceError(t *testing.T) {
-	svc := &fakeTaskListSvc{err: errors.New("api down")}
+	serviceErr := errors.New("api down")
+	svc := &fakeTaskListSvc{err: serviceErr}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	err := runTaskList(context.Background(), svc, cmd, "l1", 0, false)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "load tasks") {
-		t.Errorf("error should mention 'load tasks', got: %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, serviceErr)
+	assert.Contains(t, err.Error(), "load tasks")
 }
 
 func TestRunTaskList_AllFlag_FetchesAllPages(t *testing.T) {
@@ -190,18 +200,33 @@ func TestRunTaskList_AllFlag_FetchesAllPages(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
-	if err := runTaskList(context.Background(), svc, cmd, "l1", 0, true); err != nil {
-		t.Fatalf("runTaskList(all=true) error = %v", err)
-	}
+	cmd := newTestCmd(t, &buf)
+	err := runTaskList(context.Background(), svc, cmd, "l1", 0, true)
+	require.NoError(t, err)
 
 	out := buf.String()
-	if !strings.Contains(out, "t1") {
-		t.Errorf("expected t1 in all-pages output, got:\n%s", out)
+	assert.Contains(t, out, "t1")
+	assert.Contains(t, out, "t2")
+}
+
+func TestRunTaskList_AllFlag_PageTwoError(t *testing.T) {
+	pageErr := errors.New("page 1 unavailable")
+	svc := &fakeTaskListSvc{
+		tasks: map[string][]app.TaskSummary{
+			"l1:0": {{ID: "t1", Name: "Task 1"}},
+		},
+		errs: map[string]error{
+			"l1:1": pageErr,
+		},
 	}
-	if !strings.Contains(out, "t2") {
-		t.Errorf("expected t2 in all-pages output, got:\n%s", out)
-	}
+
+	var buf bytes.Buffer
+	cmd := newTestCmd(t, &buf)
+
+	err := runTaskList(context.Background(), svc, cmd, "l1", 0, true)
+	require.Error(t, err)
+	require.ErrorIs(t, err, pageErr)
+	assert.Contains(t, err.Error(), "page 1")
 }
 
 // --- task list: missing list ID is caught by the command's RunE ---
@@ -218,12 +243,8 @@ func TestTaskListCmd_MissingListID_ReturnsError(t *testing.T) {
 
 	root.SetArgs([]string{"task", "list"})
 	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error when no list ID is provided, got nil")
-	}
-	if !strings.Contains(err.Error(), "no list ID") {
-		t.Errorf("expected 'no list ID' error, got: %v", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no list ID")
 }
 
 func TestRunTaskList_ExplicitListIDUsed(t *testing.T) {
@@ -236,14 +257,11 @@ func TestRunTaskList_ExplicitListIDUsed(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
-	if err := runTaskList(context.Background(), svc, cmd, "explicit", 0, false); err != nil {
-		t.Fatalf("runTaskList() error = %v", err)
-	}
+	cmd := newTestCmd(t, &buf)
+	err := runTaskList(context.Background(), svc, cmd, "explicit", 0, false)
+	require.NoError(t, err)
 
-	if !strings.Contains(buf.String(), "t9") {
-		t.Errorf("expected task from explicit list, got:\n%s", buf.String())
-	}
+	assert.Contains(t, buf.String(), "t9")
 }
 
 // --- task view tests ---
@@ -267,10 +285,9 @@ func TestRunTaskView_PrintsDetail(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
-	if err := runTaskView(context.Background(), svc, cmd, "abc123"); err != nil {
-		t.Fatalf("runTaskView() error = %v", err)
-	}
+	cmd := newTestCmd(t, &buf)
+	err := runTaskView(context.Background(), svc, cmd, "abc123")
+	require.NoError(t, err)
 
 	out := buf.String()
 	for _, want := range []string{
@@ -278,9 +295,7 @@ func TestRunTaskView_PrintsDetail(t *testing.T) {
 		"alice, bob", "backend, auth", "Sprint 12", "Backend", "Engineering",
 		"Long description text here.",
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("expected %q in output, got:\n%s", want, out)
-		}
+		assert.Contains(t, out, want)
 	}
 }
 
@@ -297,18 +312,13 @@ func TestRunTaskView_SubtasksRendered(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
-	if err := runTaskView(context.Background(), svc, cmd, "p1"); err != nil {
-		t.Fatalf("runTaskView() error = %v", err)
-	}
+	cmd := newTestCmd(t, &buf)
+	err := runTaskView(context.Background(), svc, cmd, "p1")
+	require.NoError(t, err)
 
 	out := buf.String()
-	if !strings.Contains(out, "↳ [open]  Sub 1 (s1)") {
-		t.Errorf("expected subtask line in output, got:\n%s", out)
-	}
-	if !strings.Contains(out, "↳ [done]  Sub 2 (s2)") {
-		t.Errorf("expected subtask line in output, got:\n%s", out)
-	}
+	assert.Contains(t, out, "↳ [open]  Sub 1 (s1)")
+	assert.Contains(t, out, "↳ [done]  Sub 2 (s2)")
 }
 
 func TestRunTaskView_EmptyDescription(t *testing.T) {
@@ -317,30 +327,25 @@ func TestRunTaskView_EmptyDescription(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
-	if err := runTaskView(context.Background(), svc, cmd, "t1"); err != nil {
-		t.Fatalf("runTaskView() error = %v", err)
-	}
+	cmd := newTestCmd(t, &buf)
+	err := runTaskView(context.Background(), svc, cmd, "t1")
+	require.NoError(t, err)
 
 	out := buf.String()
-	if !strings.Contains(out, "Description:") {
-		t.Errorf("expected 'Description:' in output, got:\n%s", out)
-	}
+	assert.Contains(t, out, "Description:")
 }
 
 func TestRunTaskView_ServiceError(t *testing.T) {
-	svc := &fakeTaskViewSvc{err: errors.New("not found")}
+	serviceErr := errors.New("not found")
+	svc := &fakeTaskViewSvc{err: serviceErr}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	err := runTaskView(context.Background(), svc, cmd, "missing")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "load task detail") {
-		t.Errorf("expected 'load task detail' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, serviceErr)
+	assert.Contains(t, err.Error(), "load task detail")
 }
 
 // --- task status tests ---
@@ -356,20 +361,15 @@ func TestRunTaskStatus_Success(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
-	if err := runTaskStatus(context.Background(), svc, cmd, "t1", "in progress"); err != nil {
-		t.Fatalf("runTaskStatus() error = %v", err)
-	}
+	err := runTaskStatus(context.Background(), svc, cmd, "t1", "in progress")
+	require.NoError(t, err)
 
 	out := buf.String()
-	if !strings.Contains(out, `status updated to "in progress"`) {
-		t.Errorf("expected success message in output, got:\n%s", out)
-	}
-	if svc.updatedID != "t1" || svc.updatedStatus != "in progress" {
-		t.Errorf("UpdateTaskStatus called with (%q, %q), want (t1, in progress)",
-			svc.updatedID, svc.updatedStatus)
-	}
+	assert.Contains(t, out, `status updated to "in progress"`)
+	assert.Equal(t, "t1", svc.updatedID)
+	assert.Equal(t, "in progress", svc.updatedStatus)
 }
 
 func TestRunTaskStatus_InvalidStatus_PrintsAvailableAndErrors(t *testing.T) {
@@ -382,28 +382,19 @@ func TestRunTaskStatus_InvalidStatus_PrintsAvailableAndErrors(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	err := runTaskStatus(context.Background(), svc, cmd, "t1", "bogus")
-	if err == nil {
-		t.Fatal("expected error for invalid status, got nil")
-	}
-	if !strings.Contains(err.Error(), "invalid status") {
-		t.Errorf("expected 'invalid status' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid status")
 
 	// Output should list available statuses.
 	out := buf.String()
-	if !strings.Contains(out, "available statuses") {
-		t.Errorf("expected 'available statuses' in output, got:\n%s", out)
-	}
-	if !strings.Contains(out, "open") || !strings.Contains(out, "done") {
-		t.Errorf("expected status names in output, got:\n%s", out)
-	}
+	assert.Contains(t, out, "available statuses")
+	assert.Contains(t, out, "open")
+	assert.Contains(t, out, "done")
 	// Mutation must not have been called.
-	if svc.updatedID != "" {
-		t.Errorf("UpdateTaskStatus should not have been called for invalid status")
-	}
+	assert.Empty(t, svc.updatedID)
 }
 
 func TestRunTaskStatus_CaseInsensitiveMatch(t *testing.T) {
@@ -415,63 +406,56 @@ func TestRunTaskStatus_CaseInsensitiveMatch(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
-	if err := runTaskStatus(context.Background(), svc, cmd, "t1", "in progress"); err != nil {
-		t.Fatalf("runTaskStatus() error = %v; expected case-insensitive match to succeed", err)
-	}
+	err := runTaskStatus(context.Background(), svc, cmd, "t1", "in progress")
+	require.NoError(t, err)
 }
 
 func TestRunTaskStatus_DetailError(t *testing.T) {
-	svc := &fakeTaskStatusSvc{detailErr: errors.New("task not found")}
+	detailErr := errors.New("task not found")
+	svc := &fakeTaskStatusSvc{detailErr: detailErr}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	err := runTaskStatus(context.Background(), svc, cmd, "missing", "done")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "load task detail") {
-		t.Errorf("expected 'load task detail' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, detailErr)
+	assert.Contains(t, err.Error(), "load task detail")
 }
 
 func TestRunTaskStatus_LoadStatusesError(t *testing.T) {
+	statusesErr := errors.New("list not found")
 	svc := &fakeTaskStatusSvc{
 		detail:      &app.TaskDetail{ID: "t1", ListID: "l1"},
-		statusesErr: errors.New("list not found"),
+		statusesErr: statusesErr,
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	err := runTaskStatus(context.Background(), svc, cmd, "t1", "done")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "load list statuses") {
-		t.Errorf("expected 'load list statuses' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, statusesErr)
+	assert.Contains(t, err.Error(), "load list statuses")
 }
 
 func TestRunTaskStatus_UpdateError(t *testing.T) {
+	updateErr := errors.New("forbidden")
 	svc := &fakeTaskStatusSvc{
 		detail:    &app.TaskDetail{ID: "t1", ListID: "l1"},
 		statuses:  []app.StatusOption{{Name: "done"}},
-		updateErr: errors.New("forbidden"),
+		updateErr: updateErr,
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	err := runTaskStatus(context.Background(), svc, cmd, "t1", "done")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "update task status") {
-		t.Errorf("expected 'update task status' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, updateErr)
+	assert.Contains(t, err.Error(), "update task status")
 }
 
 // --- subcommand registration ---
@@ -483,9 +467,7 @@ func TestNewTaskCmd_HasExpectedSubcommands(t *testing.T) {
 		registered[c.Name()] = true
 	}
 	for _, want := range []string{"list", "view", "status", "create", "move", "update"} {
-		if !registered[want] {
-			t.Errorf("expected subcommand %q to be registered; have: %v", want, registered)
-		}
+		assert.True(t, registered[want], "expected subcommand %q to be registered; have: %v", want, registered)
 	}
 }
 
@@ -514,35 +496,28 @@ func TestRunTaskCreate_HappyPath(t *testing.T) {
 	svc := &fakeTaskCreateSvc{taskID: "new-task-id"}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	input := app.CreateTaskInput{Name: "Fix login bug"}
-	if err := runTaskCreate(context.Background(), svc, cmd, "list-1", input); err != nil {
-		t.Fatalf("runTaskCreate() error = %v", err)
-	}
+	err := runTaskCreate(context.Background(), svc, cmd, "list-1", input)
+	require.NoError(t, err)
 
 	out := buf.String()
-	if !strings.Contains(out, "Task created: new-task-id") {
-		t.Errorf("expected 'Task created: new-task-id' in output, got:\n%s", out)
-	}
-	if svc.capturedListID != "list-1" {
-		t.Errorf("CreateTask listID = %q, want %q", svc.capturedListID, "list-1")
-	}
+	assert.Contains(t, out, "Task created: new-task-id")
+	assert.Equal(t, "list-1", svc.capturedListID)
 }
 
 func TestRunTaskCreate_ServiceError(t *testing.T) {
-	svc := &fakeTaskCreateSvc{err: errors.New("api error")}
+	serviceErr := errors.New("api error")
+	svc := &fakeTaskCreateSvc{err: serviceErr}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	err := runTaskCreate(context.Background(), svc, cmd, "list-1", app.CreateTaskInput{Name: "Task"})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "create task") {
-		t.Errorf("expected 'create task' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, serviceErr)
+	assert.Contains(t, err.Error(), "create task")
 }
 
 func TestTaskCreateCmd_MissingName_ReturnsError(t *testing.T) {
@@ -555,12 +530,8 @@ func TestTaskCreateCmd_MissingName_ReturnsError(t *testing.T) {
 
 	root.SetArgs([]string{"task", "create", "--list", "l1"})
 	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error when --name is missing, got nil")
-	}
-	if !strings.Contains(err.Error(), "name") {
-		t.Errorf("expected 'name' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "name")
 }
 
 func TestTaskCreateCmd_MissingListID_ReturnsError(t *testing.T) {
@@ -573,12 +544,8 @@ func TestTaskCreateCmd_MissingListID_ReturnsError(t *testing.T) {
 
 	root.SetArgs([]string{"task", "create", "--name", "My Task"})
 	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error when no list ID is provided, got nil")
-	}
-	if !strings.Contains(err.Error(), "no list ID") {
-		t.Errorf("expected 'no list ID' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no list ID")
 }
 
 // --- task move fakes ---
@@ -611,34 +578,27 @@ func TestRunTaskMove_HappyPath(t *testing.T) {
 	svc := &fakeTaskMoveSvc{}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
-	if err := runTaskMove(context.Background(), svc, cmd, "ws-1", "task-abc", "list-99"); err != nil {
-		t.Fatalf("runTaskMove() error = %v", err)
-	}
+	err := runTaskMove(context.Background(), svc, cmd, "ws-1", "task-abc", "list-99")
+	require.NoError(t, err)
 
 	out := buf.String()
-	if !strings.Contains(out, "Task task-abc moved to list list-99.") {
-		t.Errorf("expected 'Task task-abc moved to list list-99.' in output, got:\n%s", out)
-	}
-	if svc.capturedWorkspace != "ws-1" {
-		t.Errorf("MoveTaskToList workspaceID = %q, want %q", svc.capturedWorkspace, "ws-1")
-	}
+	assert.Contains(t, out, "Task task-abc moved to list list-99.")
+	assert.Equal(t, "ws-1", svc.capturedWorkspace)
 }
 
 func TestRunTaskMove_ServiceError(t *testing.T) {
-	svc := &fakeTaskMoveSvc{err: errors.New("forbidden")}
+	serviceErr := errors.New("forbidden")
+	svc := &fakeTaskMoveSvc{err: serviceErr}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	err := runTaskMove(context.Background(), svc, cmd, "ws-1", "task-abc", "list-99")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "move task") {
-		t.Errorf("expected 'move task' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, serviceErr)
+	assert.Contains(t, err.Error(), "move task")
 }
 
 func TestTaskMoveCmd_MissingWorkspaceID_ReturnsError(t *testing.T) {
@@ -651,12 +611,8 @@ func TestTaskMoveCmd_MissingWorkspaceID_ReturnsError(t *testing.T) {
 
 	root.SetArgs([]string{"task", "move", "task-abc", "--to-list", "list-99"})
 	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error when no workspace ID is provided, got nil")
-	}
-	if !strings.Contains(err.Error(), "no workspace ID") {
-		t.Errorf("expected 'no workspace ID' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no workspace ID")
 }
 
 // --- task update fakes ---
@@ -680,41 +636,33 @@ func TestRunTaskUpdate_HappyPath_Name(t *testing.T) {
 	svc := &fakeTaskUpdateSvc{}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	name := "New title"
 	input := app.UpdateTaskInput{Name: &name}
 
-	if err := runTaskUpdate(context.Background(), svc, cmd, "task-xyz", input); err != nil {
-		t.Fatalf("runTaskUpdate() error = %v", err)
-	}
+	err := runTaskUpdate(context.Background(), svc, cmd, "task-xyz", input)
+	require.NoError(t, err)
 
 	out := buf.String()
-	if !strings.Contains(out, "Task task-xyz updated.") {
-		t.Errorf("expected 'Task task-xyz updated.' in output, got:\n%s", out)
-	}
-	if svc.capturedTaskID != "task-xyz" {
-		t.Errorf("UpdateTask taskID = %q, want %q", svc.capturedTaskID, "task-xyz")
-	}
-	if svc.capturedInput.Name == nil || *svc.capturedInput.Name != "New title" {
-		t.Errorf("UpdateTask input.Name = %v, want %q", svc.capturedInput.Name, "New title")
-	}
+	assert.Contains(t, out, "Task task-xyz updated.")
+	assert.Equal(t, "task-xyz", svc.capturedTaskID)
+	require.NotNil(t, svc.capturedInput.Name)
+	assert.Equal(t, "New title", *svc.capturedInput.Name)
 }
 
 func TestRunTaskUpdate_ServiceError(t *testing.T) {
-	svc := &fakeTaskUpdateSvc{err: errors.New("forbidden")}
+	serviceErr := errors.New("forbidden")
+	svc := &fakeTaskUpdateSvc{err: serviceErr}
 
 	var buf bytes.Buffer
-	cmd := newTestCmd(&buf)
+	cmd := newTestCmd(t, &buf)
 
 	name := "New title"
 	err := runTaskUpdate(context.Background(), svc, cmd, "task-xyz", app.UpdateTaskInput{Name: &name})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "update task") {
-		t.Errorf("expected 'update task' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, serviceErr)
+	assert.Contains(t, err.Error(), "update task")
 }
 
 func TestTaskUpdateCmd_NoFields_ReturnsError(t *testing.T) {
@@ -727,12 +675,36 @@ func TestTaskUpdateCmd_NoFields_ReturnsError(t *testing.T) {
 
 	root.SetArgs([]string{"task", "update", "task-abc"})
 	err := root.Execute()
-	if err == nil {
-		t.Fatal("expected error when no update fields are specified, got nil")
-	}
-	if !strings.Contains(err.Error(), "no update fields specified") {
-		t.Errorf("expected 'no update fields specified' in error, got: %v", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no update fields specified")
+}
+
+func TestTaskUpdateCmd_MutuallyExclusiveDescriptionFlags_ReturnsError(t *testing.T) {
+	root := New()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+
+	setTestConfigDir(t, t.TempDir())
+
+	root.SetArgs([]string{"task", "update", "task-abc", "--description", "desc", "--clear-description"})
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--description and --clear-description are mutually exclusive")
+}
+
+func TestTaskUpdateCmd_MutuallyExclusiveDueFlags_ReturnsError(t *testing.T) {
+	root := New()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+
+	setTestConfigDir(t, t.TempDir())
+
+	root.SetArgs([]string{"task", "update", "task-abc", "--due", "2026-05-01", "--clear-due"})
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--due and --clear-due are mutually exclusive")
 }
 
 // --- helper conversion tests ---
@@ -746,6 +718,7 @@ func TestParsePriority(t *testing.T) {
 	}{
 		{"urgent", "urgent", 1, false},
 		{"high", "high", 2, false},
+		{"uppercase_rejected", "HIGH", 0, true},
 		{"normal", "normal", 3, false},
 		{"low", "low", 4, false},
 		{"none", "none", 0, false},
@@ -755,19 +728,14 @@ func TestParsePriority(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := parsePriority(tc.input)
 			if tc.wantErr {
-				if err == nil {
-					t.Errorf("parsePriority(%q) = %d, want error", tc.input, got)
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("parsePriority(%q) error = %v", tc.input, err)
-			}
-			if got != tc.want {
-				t.Errorf("parsePriority(%q) = %d, want %d", tc.input, got, tc.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -788,21 +756,18 @@ func TestParseDueDate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := parseDueDate(tc.input)
 			if tc.wantErr {
-				if err == nil {
-					t.Errorf("parseDueDate(%q) = %q, want error", tc.input, got)
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("parseDueDate(%q) error = %v", tc.input, err)
+			require.NoError(t, err)
+			if tc.wantEmpty {
+				assert.Equal(t, "", got)
 			}
-			if tc.wantEmpty && got != "" {
-				t.Errorf("parseDueDate(%q) = %q, want empty string", tc.input, got)
-			}
-			if tc.wantMS && got == "" {
-				t.Errorf("parseDueDate(%q) = %q, want non-empty epoch ms string", tc.input, got)
+			if tc.wantMS {
+				assert.NotEmpty(t, got)
 			}
 		})
 	}
@@ -811,13 +776,9 @@ func TestParseDueDate(t *testing.T) {
 func TestParseDueDate_EpochMillisValue(t *testing.T) {
 	// 2026-05-01 UTC should produce 1777593600000 ms.
 	got, err := parseDueDate("2026-05-01")
-	if err != nil {
-		t.Fatalf("parseDueDate(\"2026-05-01\") error = %v", err)
-	}
+	require.NoError(t, err)
 	const want = "1777593600000"
-	if got != want {
-		t.Errorf("parseDueDate(\"2026-05-01\") = %q, want %q", got, want)
-	}
+	assert.Equal(t, want, got)
 }
 
 // --- JSON output mode tests ---
@@ -833,25 +794,17 @@ func TestRunTaskList_JSONMode(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmdWithOutput(&buf, "json")
+	cmd := newTestCmdWithOutput(t, &buf, "json")
 
-	if err := runTaskList(context.Background(), svc, cmd, "l1", 0, false); err != nil {
-		t.Fatalf("runTaskList() error = %v", err)
-	}
+	err := runTaskList(context.Background(), svc, cmd, "l1", 0, false)
+	require.NoError(t, err)
 
 	var got []app.TaskSummary
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
-	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(got))
-	}
-	if got[0].ID != "t1" {
-		t.Errorf("got[0].ID = %q, want %q", got[0].ID, "t1")
-	}
-	if got[1].ID != "t2" {
-		t.Errorf("got[1].ID = %q, want %q", got[1].ID, "t2")
-	}
+	err = json.Unmarshal(buf.Bytes(), &got)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "t1", got[0].ID)
+	assert.Equal(t, "t2", got[1].ID)
 }
 
 func TestRunTaskList_JSONMode_EmptySlice(t *testing.T) {
@@ -860,17 +813,14 @@ func TestRunTaskList_JSONMode_EmptySlice(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmdWithOutput(&buf, "json")
+	cmd := newTestCmdWithOutput(t, &buf, "json")
 
-	if err := runTaskList(context.Background(), svc, cmd, "l1", 0, false); err != nil {
-		t.Fatalf("runTaskList() error = %v", err)
-	}
+	err := runTaskList(context.Background(), svc, cmd, "l1", 0, false)
+	require.NoError(t, err)
 
 	// Should encode as [] not null.
 	trimmed := strings.TrimSpace(buf.String())
-	if trimmed != "[]" {
-		t.Errorf("expected empty JSON array [], got: %s", trimmed)
-	}
+	assert.Equal(t, "[]", trimmed)
 }
 
 func TestRunTaskView_JSONMode(t *testing.T) {
@@ -889,25 +839,34 @@ func TestRunTaskView_JSONMode(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmdWithOutput(&buf, "json")
+	cmd := newTestCmdWithOutput(t, &buf, "json")
 
-	if err := runTaskView(context.Background(), svc, cmd, "abc123"); err != nil {
-		t.Fatalf("runTaskView() error = %v", err)
-	}
+	err := runTaskView(context.Background(), svc, cmd, "abc123")
+	require.NoError(t, err)
 
 	var got app.TaskDetail
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
+	err = json.Unmarshal(buf.Bytes(), &got)
+	require.NoError(t, err)
+	assert.Equal(t, "abc123", got.ID)
+	assert.Equal(t, "Fix login bug", got.Name)
+	require.Len(t, got.Assignees, 2)
+}
+
+func TestRunTaskView_JSONMode_NilSubtasks(t *testing.T) {
+	svc := &fakeTaskViewSvc{
+		detail: &app.TaskDetail{
+			ID:       "abc123",
+			Name:     "Fix login bug",
+			Subtasks: nil,
+		},
 	}
-	if got.ID != "abc123" {
-		t.Errorf("got.ID = %q, want %q", got.ID, "abc123")
-	}
-	if got.Name != "Fix login bug" {
-		t.Errorf("got.Name = %q, want %q", got.Name, "Fix login bug")
-	}
-	if len(got.Assignees) != 2 {
-		t.Errorf("got.Assignees = %v, want 2 items", got.Assignees)
-	}
+
+	var buf bytes.Buffer
+	cmd := newTestCmdWithOutput(t, &buf, "json")
+
+	err := runTaskView(context.Background(), svc, cmd, "abc123")
+	require.NoError(t, err)
+	assert.Contains(t, strings.TrimSpace(buf.String()), `"subtasks":null`)
 }
 
 func TestRunTaskStatus_JSONMode(t *testing.T) {
@@ -919,122 +878,81 @@ func TestRunTaskStatus_JSONMode(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := newTestCmdWithOutput(&buf, "json")
+	cmd := newTestCmdWithOutput(t, &buf, "json")
 
-	if err := runTaskStatus(context.Background(), svc, cmd, "t1", "done"); err != nil {
-		t.Fatalf("runTaskStatus() error = %v", err)
-	}
+	err := runTaskStatus(context.Background(), svc, cmd, "t1", "done")
+	require.NoError(t, err)
 
 	var got taskMutationResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
-	}
-	if !got.OK {
-		t.Errorf("got.OK = false, want true")
-	}
-	if got.ID != "t1" {
-		t.Errorf("got.ID = %q, want %q", got.ID, "t1")
-	}
+	err = json.Unmarshal(buf.Bytes(), &got)
+	require.NoError(t, err)
+	assert.True(t, got.OK)
+	assert.Equal(t, "t1", got.ID)
 }
 
 func TestRunTaskCreate_JSONMode(t *testing.T) {
 	svc := &fakeTaskCreateSvc{taskID: "new-task-id"}
 
 	var buf bytes.Buffer
-	cmd := newTestCmdWithOutput(&buf, "json")
+	cmd := newTestCmdWithOutput(t, &buf, "json")
 
 	input := app.CreateTaskInput{Name: "Fix login bug"}
-	if err := runTaskCreate(context.Background(), svc, cmd, "list-1", input); err != nil {
-		t.Fatalf("runTaskCreate() error = %v", err)
-	}
+	err := runTaskCreate(context.Background(), svc, cmd, "list-1", input)
+	require.NoError(t, err)
 
 	var got taskMutationResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
-	}
-	if !got.OK {
-		t.Errorf("got.OK = false, want true")
-	}
-	if got.ID != "new-task-id" {
-		t.Errorf("got.ID = %q, want %q", got.ID, "new-task-id")
-	}
+	err = json.Unmarshal(buf.Bytes(), &got)
+	require.NoError(t, err)
+	assert.True(t, got.OK)
+	assert.Equal(t, "new-task-id", got.ID)
 }
 
 func TestRunTaskMove_JSONMode(t *testing.T) {
 	svc := &fakeTaskMoveSvc{}
 
 	var buf bytes.Buffer
-	cmd := newTestCmdWithOutput(&buf, "json")
+	cmd := newTestCmdWithOutput(t, &buf, "json")
 
-	if err := runTaskMove(context.Background(), svc, cmd, "ws-1", "task-abc", "list-99"); err != nil {
-		t.Fatalf("runTaskMove() error = %v", err)
-	}
+	err := runTaskMove(context.Background(), svc, cmd, "ws-1", "task-abc", "list-99")
+	require.NoError(t, err)
 
 	var got taskMutationResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
-	}
-	if !got.OK {
-		t.Errorf("got.OK = false, want true")
-	}
-	if got.ID != "task-abc" {
-		t.Errorf("got.ID = %q, want %q", got.ID, "task-abc")
-	}
+	err = json.Unmarshal(buf.Bytes(), &got)
+	require.NoError(t, err)
+	assert.True(t, got.OK)
+	assert.Equal(t, "task-abc", got.ID)
 }
 
 func TestRunTaskUpdate_JSONMode(t *testing.T) {
 	svc := &fakeTaskUpdateSvc{}
 
 	var buf bytes.Buffer
-	cmd := newTestCmdWithOutput(&buf, "json")
+	cmd := newTestCmdWithOutput(t, &buf, "json")
 
 	name := "New title"
 	input := app.UpdateTaskInput{Name: &name}
 
-	if err := runTaskUpdate(context.Background(), svc, cmd, "task-xyz", input); err != nil {
-		t.Fatalf("runTaskUpdate() error = %v", err)
-	}
+	err := runTaskUpdate(context.Background(), svc, cmd, "task-xyz", input)
+	require.NoError(t, err)
 
 	var got taskMutationResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v; raw output: %s", err, buf.String())
-	}
-	if !got.OK {
-		t.Errorf("got.OK = false, want true")
-	}
-	if got.ID != "task-xyz" {
-		t.Errorf("got.ID = %q, want %q", got.ID, "task-xyz")
-	}
+	err = json.Unmarshal(buf.Bytes(), &got)
+	require.NoError(t, err)
+	assert.True(t, got.OK)
+	assert.Equal(t, "task-xyz", got.ID)
 }
 
 // --- invalid output mode test ---
 
-// fakeTaskCreateSvcCallTracker wraps fakeTaskCreateSvc to verify it was not called.
-type fakeTaskCreateSvcCallTracker struct {
-	called bool
-	taskID string
-}
-
-func (f *fakeTaskCreateSvcCallTracker) CreateTask(_ context.Context, _ string, _ app.CreateTaskInput) (string, error) {
-	f.called = true
-	return f.taskID, nil
-}
-
 func TestRunTaskCreate_InvalidOutputMode_ErrorBeforeServiceCall(t *testing.T) {
-	svc := &fakeTaskCreateSvcCallTracker{taskID: "irrelevant"}
+	svc := &fakeTaskCreateSvc{taskID: "irrelevant"}
 
 	var buf bytes.Buffer
-	cmd := newTestCmdWithOutput(&buf, "xml") // unsupported format
+	cmd := newTestCmdWithOutput(t, &buf, "xml") // unsupported format
 
 	input := app.CreateTaskInput{Name: "Task"}
 	err := runTaskCreate(context.Background(), svc, cmd, "list-1", input)
-	if err == nil {
-		t.Fatal("expected error for invalid output mode, got nil")
-	}
-	if !strings.Contains(err.Error(), "unsupported output format") {
-		t.Errorf("expected 'unsupported output format' in error, got: %v", err)
-	}
-	if svc.called {
-		t.Error("CreateTask should NOT have been called for invalid output mode")
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported output format")
+	assert.Equal(t, "", svc.capturedListID)
 }

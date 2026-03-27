@@ -4,6 +4,9 @@ package tui
 import (
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ── InputModalConfig.Validate ─────────────────────────────────────────────────
@@ -25,16 +28,10 @@ func TestInputModal_Validate_AcceptsValidInput(t *testing.T) {
 	// Simulate what ShowInputModal does on Enter with valid input.
 	val := "hello"
 	err := cfg.Validate(val)
-	if err != nil {
-		t.Fatalf("Validate(%q) = %v, want nil", val, err)
-	}
-	if !called {
-		t.Error("Validate callback was not called")
-	}
+	require.NoError(t, err)
+	assert.True(t, called)
 	cfg.OnSubmit(val)
-	if submitted != val {
-		t.Errorf("OnSubmit received %q, want %q", submitted, val)
-	}
+	assert.Equal(t, val, submitted)
 }
 
 func TestInputModal_Validate_BlocksEmptyInput(t *testing.T) {
@@ -48,9 +45,7 @@ func TestInputModal_Validate_BlocksEmptyInput(t *testing.T) {
 	}
 
 	err := cfg.Validate("")
-	if err == nil {
-		t.Error("Validate('') = nil, want non-nil error")
-	}
+	assert.Error(t, err)
 }
 
 func TestInputModal_NoValidate_AlwaysPasses(t *testing.T) {
@@ -64,9 +59,7 @@ func TestInputModal_NoValidate_AlwaysPasses(t *testing.T) {
 
 	// No validation to run; directly call submit.
 	cfg.OnSubmit("")
-	if submitted != "" {
-		t.Errorf("OnSubmit received %q, want empty string", submitted)
-	}
+	assert.Equal(t, "", submitted)
 }
 
 func TestInputModal_Validate_CustomError(t *testing.T) {
@@ -91,10 +84,9 @@ func TestInputModal_Validate_CustomError(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := cfg.Validate(tc.input)
-			if (err != nil) != tc.wantErr {
-				t.Errorf("Validate(%q) error = %v, wantErr = %v", tc.input, err, tc.wantErr)
-			}
+			assert.Equal(t, tc.wantErr, err != nil)
 		})
 	}
 }
@@ -105,7 +97,5 @@ func TestInputModal_OnCancel_Called(t *testing.T) {
 		OnCancel: func() { cancelled = true },
 	}
 	cfg.OnCancel()
-	if !cancelled {
-		t.Error("OnCancel was not called")
-	}
+	assert.True(t, cancelled)
 }

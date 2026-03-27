@@ -10,16 +10,20 @@ import (
 
 func TestNodeKind_String(t *testing.T) {
 	tests := []struct {
+		name string
 		kind app.NodeKind
 		want string
 	}{
-		{app.NodeWorkspace, "Workspace"},
-		{app.NodeSpace, "Space"},
-		{app.NodeFolder, "Folder"},
-		{app.NodeList, "List"},
-		{app.NodeKind(99), "Unknown"},
+		{"workspace", app.NodeWorkspace, "Workspace"},
+		{"space", app.NodeSpace, "Space"},
+		{"folder", app.NodeFolder, "Folder"},
+		{"list", app.NodeList, "List"},
+		{"unknown", app.NodeKind(99), "Unknown"},
 	}
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, tt.kind.String())
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.kind.String())
+		})
 	}
 }

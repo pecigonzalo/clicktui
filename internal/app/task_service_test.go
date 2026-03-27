@@ -59,7 +59,7 @@ func TestTaskService_LoadTasks_Error(t *testing.T) {
 	svc := app.NewTaskService(api)
 	_, err := svc.LoadTasks(context.Background(), "l1", 0)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load tasks")
+	assert.ErrorContains(t, err, "load tasks")
 }
 
 func TestTaskService_LoadTaskDetail(t *testing.T) {
@@ -112,7 +112,7 @@ func TestTaskService_LoadTaskDetail_Error(t *testing.T) {
 	svc := app.NewTaskService(api)
 	_, err := svc.LoadTaskDetail(context.Background(), "nonexistent")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load task detail")
+	assert.ErrorContains(t, err, "load task detail")
 }
 
 func TestTaskService_LoadTasks_NilPriority(t *testing.T) {
@@ -192,7 +192,7 @@ func TestTaskService_LoadListStatuses_Error(t *testing.T) {
 	svc := app.NewTaskService(api)
 	_, err := svc.LoadListStatuses(context.Background(), "l1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load list statuses")
+	assert.ErrorContains(t, err, "load list statuses")
 }
 
 func TestTaskService_UpdateTaskStatus(t *testing.T) {
@@ -223,7 +223,8 @@ func TestTaskService_UpdateTaskStatus_Error(t *testing.T) {
 	svc := app.NewTaskService(api)
 	_, err := svc.UpdateTaskStatus(context.Background(), "t1", "invalid_status")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "update task status")
+	assert.ErrorContains(t, err, "update task status")
+	require.ErrorIs(t, err, api.updateStatusErr)
 }
 
 func TestTaskService_UpdateTaskStatus_Unauthorized(t *testing.T) {
@@ -233,7 +234,8 @@ func TestTaskService_UpdateTaskStatus_Unauthorized(t *testing.T) {
 	svc := app.NewTaskService(api)
 	_, err := svc.UpdateTaskStatus(context.Background(), "t1", "done")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "update task status")
+	assert.ErrorContains(t, err, "update task status")
+	require.ErrorIs(t, err, api.updateStatusErr)
 
 	var apiErr *clickup.APIError
 	require.ErrorAs(t, err, &apiErr)
@@ -448,7 +450,8 @@ func TestTaskService_MoveTaskToList_Error(t *testing.T) {
 	svc := app.NewTaskService(api)
 	_, err := svc.MoveTaskToList(context.Background(), "w1", "t1", "missing")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "move task to list")
+	assert.ErrorContains(t, err, "move task to list")
+	require.ErrorIs(t, err, api.moveTaskErr)
 }
 
 func TestTaskService_MoveTaskToList_FallbackListIDWhenResponseOmitted(t *testing.T) {
@@ -465,6 +468,49 @@ func TestTaskService_MoveTaskToList_FallbackListIDWhenResponseOmitted(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, detail)
 	assert.Equal(t, "l2", detail.ListID)
+}
+
+func TestTaskService_MoveTaskToList_EvictsStatusCaches(t *testing.T) {
+	api := newCountingAPI()
+	api.tasksByID["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Fix login",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l1", Name: "Backlog"},
+	}
+	api.movedTasks["t1"] = &clickup.Task{
+		ID:     "t1",
+		Name:   "Fix login",
+		Status: clickup.Status{Status: "open"},
+		List:   clickup.TaskRef{ID: "l2", Name: "In Progress"},
+	}
+	api.statusesByListID["l1"] = []clickup.Status{{Status: "open", Color: "#ccc", Type: "open"}}
+	api.statusesByListID["l2"] = []clickup.Status{{Status: "todo", Color: "#aaa", Type: "open"}}
+
+	svc := app.NewTaskService(api)
+	ctx := context.Background()
+
+	// Prime old/new list status caches.
+	_, err := svc.LoadListStatuses(ctx, "l1")
+	require.NoError(t, err)
+	_, err = svc.LoadListStatuses(ctx, "l2")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), api.listStatusesCalls.Load())
+
+	// Prime detail cache so MoveTaskToList can detect old list ID (l1).
+	_, err = svc.LoadTaskDetail(ctx, "t1")
+	require.NoError(t, err)
+
+	// Move to l2 should evict status caches for both l1 and l2.
+	_, err = svc.MoveTaskToList(ctx, "w1", "t1", "l2")
+	require.NoError(t, err)
+
+	_, err = svc.LoadListStatuses(ctx, "l1")
+	require.NoError(t, err)
+	_, err = svc.LoadListStatuses(ctx, "l2")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(4), api.listStatusesCalls.Load(), "status caches for old and new lists should be evicted by MoveTaskToList")
 }
 
 func TestOrderByParent_ParentFollowedByChildren(t *testing.T) {
@@ -1140,7 +1186,8 @@ func TestTaskService_UpdateTask_Error(t *testing.T) {
 	newName := "x"
 	err := svc.UpdateTask(context.Background(), "t1", app.UpdateTaskInput{Name: &newName})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "update task")
+	assert.ErrorContains(t, err, "update task")
+	require.ErrorIs(t, err, api.updateTaskErr)
 
 	var apiErr *clickup.APIError
 	require.ErrorAs(t, err, &apiErr)
@@ -1190,7 +1237,8 @@ func TestTaskService_CreateTask_Error(t *testing.T) {
 	svc := app.NewTaskService(api)
 	_, err := svc.CreateTask(context.Background(), "l1", app.CreateTaskInput{Name: "Task"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "create task")
+	assert.ErrorContains(t, err, "create task")
+	require.ErrorIs(t, err, api.createTaskErr)
 
 	var apiErr *clickup.APIError
 	require.ErrorAs(t, err, &apiErr)
@@ -1240,5 +1288,5 @@ func TestTaskService_LoadMembers_Error(t *testing.T) {
 	svc := app.NewTaskService(api)
 	_, err := svc.LoadMembers(context.Background(), "l1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load members")
+	assert.ErrorContains(t, err, "load members")
 }

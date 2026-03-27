@@ -146,130 +146,224 @@ func TestTask_Success(t *testing.T) {
 	assert.Equal(t, "Sprint 42", task.List.Name)
 }
 
-func TestTasks_APIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
+func TestTasks_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			client := newTestClient(t, "pk_test", srv)
+			_, err := client.Tasks(context.Background(), "l1", 0)
+			require.Error(t, err)
+
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
+}
+
+func TestSpaces_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		token  string
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`, token: "bad_token"},
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`, token: "pk_test"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			client := newTestClient(t, tc.token, srv)
+			_, err := client.Spaces(context.Background(), "t1")
+			require.Error(t, err)
+
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
+}
+
+func TestFolders_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			client := newTestClient(t, "bad_token", srv)
+			_, err := client.Folders(context.Background(), "s1")
+			require.Error(t, err)
+
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
+}
+
+func TestFolderlessLists_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			client := newTestClient(t, "pk_test", srv)
+			_, err := client.FolderlessLists(context.Background(), "s1")
+			require.Error(t, err)
+
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
+}
+
+func TestTask_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		token  string
+		taskID string
+	}{
+		{name: "not_found", status: http.StatusNotFound, body: `{"err":"Task not found"}`, token: "pk_test", taskID: "missing"},
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`, token: "bad_token", taskID: "t1"},
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`, token: "pk_test", taskID: "t1"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			client := newTestClient(t, tc.token, srv)
+			_, err := client.Task(context.Background(), tc.taskID)
+			require.Error(t, err)
+
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
+}
+
+func TestGetList_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/list/l1", r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "l1",
+			"name": "Sprint 42",
+			"space": map[string]any{
+				"id":   "s1",
+				"name": "Engineering",
+			},
+			"folder": map[string]any{
+				"id":   "f1",
+				"name": "Backend",
+			},
+			"statuses": []map[string]any{
+				{"status": "open", "color": "#d3d3d3", "type": "open"},
+			},
+		})
 	}))
 	defer srv.Close()
 
 	client := newTestClient(t, "pk_test", srv)
-	_, err := client.Tasks(context.Background(), "l1", 0)
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 429, apiErr.StatusCode)
+	list, err := client.GetList(context.Background(), "l1")
+	require.NoError(t, err)
+	require.NotNil(t, list)
+	assert.Equal(t, "l1", list.ID)
+	assert.Equal(t, "Sprint 42", list.Name)
+	assert.Equal(t, "s1", list.Space.ID)
+	assert.Equal(t, "f1", list.Folder.ID)
 }
 
-func TestSpaces_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
+func TestGetList_Error(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		listID string
+	}{
+		{name: "not_found", status: http.StatusNotFound, body: `{"err":"List not found"}`, listID: "missing"},
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`, listID: "l1"},
+	}
 
-	client := newTestClient(t, "bad_token", srv)
-	_, err := client.Spaces(context.Background(), "t1")
-	require.Error(t, err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
-}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
 
-func TestSpaces_RateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
-	}))
-	defer srv.Close()
+			client := newTestClient(t, "pk_test", srv)
+			_, err := client.GetList(context.Background(), tc.listID)
+			require.Error(t, err)
 
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.Spaces(context.Background(), "t1")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 429, apiErr.StatusCode)
-}
-
-func TestFolders_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, "bad_token", srv)
-	_, err := client.Folders(context.Background(), "s1")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
-}
-
-func TestFolderlessLists_RateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.FolderlessLists(context.Background(), "s1")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 429, apiErr.StatusCode)
-}
-
-func TestTask_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"err":"Task not found"}`))
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.Task(context.Background(), "missing")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 404, apiErr.StatusCode)
-}
-
-func TestTask_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, "bad_token", srv)
-	_, err := client.Task(context.Background(), "t1")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
-}
-
-func TestTask_RateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.Task(context.Background(), "t1")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 429, apiErr.StatusCode)
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
 }

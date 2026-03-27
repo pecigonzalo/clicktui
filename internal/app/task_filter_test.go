@@ -11,120 +11,139 @@ import (
 
 // ── ParseTaskQuery ──────────────────────────────────────────────────────────
 
-func TestParseTaskQuery_StatusOnly(t *testing.T) {
-	q := app.ParseTaskQuery("status:todo")
-	require.Len(t, q.Fields, 1)
-	assert.Equal(t, "status", q.Fields[0].Field)
-	assert.Equal(t, "todo", q.Fields[0].Value)
-	assert.Empty(t, q.FreeText)
-}
+func TestParseTaskQuery(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		want      []app.FieldFilter
+		wantFree  string
+		wantEmpty bool
+	}{
+		{
+			name:     "status only",
+			input:    "status:todo",
+			want:     []app.FieldFilter{{Field: "status", Value: "todo"}},
+			wantFree: "",
+		},
+		{
+			name:     "priority only",
+			input:    "priority:high",
+			want:     []app.FieldFilter{{Field: "priority", Value: "high"}},
+			wantFree: "",
+		},
+		{
+			name:     "multi-word value",
+			input:    "status:in progress",
+			want:     []app.FieldFilter{{Field: "status", Value: "in progress"}},
+			wantFree: "",
+		},
+		{
+			name:     "field greedy value",
+			input:    "status:todo auth",
+			want:     []app.FieldFilter{{Field: "status", Value: "todo auth"}},
+			wantFree: "",
+		},
+		{
+			name:     "free text before field",
+			input:    "auth status:todo",
+			want:     []app.FieldFilter{{Field: "status", Value: "todo"}},
+			wantFree: "auth",
+		},
+		{
+			name:  "multiple fields",
+			input: "status:todo priority:high",
+			want: []app.FieldFilter{
+				{Field: "status", Value: "todo"},
+				{Field: "priority", Value: "high"},
+			},
+			wantFree: "",
+		},
+		{
+			name:      "empty string",
+			input:     "",
+			want:      nil,
+			wantFree:  "",
+			wantEmpty: true,
+		},
+		{
+			name:      "whitespace only",
+			input:     "   ",
+			want:      nil,
+			wantFree:  "",
+			wantEmpty: true,
+		},
+		{
+			name:     "free text only",
+			input:    "auth login",
+			want:     nil,
+			wantFree: "auth login",
+		},
+		{
+			name:     "unknown field",
+			input:    "foo:bar",
+			want:     nil,
+			wantFree: "foo:bar",
+		},
+		{
+			name:      "partial field no value",
+			input:     "status:",
+			want:      nil,
+			wantFree:  "",
+			wantEmpty: true,
+		},
+		{
+			name:     "case-insensitive field",
+			input:    "Status:TODO",
+			want:     []app.FieldFilter{{Field: "status", Value: "todo"}},
+			wantFree: "",
+		},
+		{
+			name:  "multi-word value followed by field",
+			input: "status:in progress priority:high",
+			want: []app.FieldFilter{
+				{Field: "status", Value: "in progress"},
+				{Field: "priority", Value: "high"},
+			},
+			wantFree: "",
+		},
+	}
 
-func TestParseTaskQuery_PriorityOnly(t *testing.T) {
-	q := app.ParseTaskQuery("priority:high")
-	require.Len(t, q.Fields, 1)
-	assert.Equal(t, "priority", q.Fields[0].Field)
-	assert.Equal(t, "high", q.Fields[0].Value)
-	assert.Empty(t, q.FreeText)
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-func TestParseTaskQuery_MultiWordValue(t *testing.T) {
-	q := app.ParseTaskQuery("status:in progress")
-	require.Len(t, q.Fields, 1)
-	assert.Equal(t, "status", q.Fields[0].Field)
-	assert.Equal(t, "in progress", q.Fields[0].Value)
-	assert.Empty(t, q.FreeText)
-}
-
-func TestParseTaskQuery_FieldGreedyValue(t *testing.T) {
-	// Value is greedy: consumes all words up to the next field token or end.
-	q := app.ParseTaskQuery("status:todo auth")
-	require.Len(t, q.Fields, 1)
-	assert.Equal(t, "status", q.Fields[0].Field)
-	assert.Equal(t, "todo auth", q.Fields[0].Value)
-	assert.Empty(t, q.FreeText)
-}
-
-func TestParseTaskQuery_FreeTextBeforeField(t *testing.T) {
-	q := app.ParseTaskQuery("auth status:todo")
-	require.Len(t, q.Fields, 1)
-	assert.Equal(t, "status", q.Fields[0].Field)
-	assert.Equal(t, "todo", q.Fields[0].Value)
-	assert.Equal(t, "auth", q.FreeText)
-}
-
-func TestParseTaskQuery_MultipleFields(t *testing.T) {
-	q := app.ParseTaskQuery("status:todo priority:high")
-	require.Len(t, q.Fields, 2)
-	assert.Equal(t, "status", q.Fields[0].Field)
-	assert.Equal(t, "todo", q.Fields[0].Value)
-	assert.Equal(t, "priority", q.Fields[1].Field)
-	assert.Equal(t, "high", q.Fields[1].Value)
-}
-
-func TestParseTaskQuery_EmptyString(t *testing.T) {
-	q := app.ParseTaskQuery("")
-	assert.True(t, q.Empty())
-	assert.Empty(t, q.Fields)
-	assert.Empty(t, q.FreeText)
-}
-
-func TestParseTaskQuery_WhitespaceOnly(t *testing.T) {
-	q := app.ParseTaskQuery("   ")
-	assert.True(t, q.Empty())
-}
-
-func TestParseTaskQuery_FreeTextOnly(t *testing.T) {
-	q := app.ParseTaskQuery("auth login")
-	assert.Empty(t, q.Fields)
-	assert.Equal(t, "auth login", q.FreeText)
-}
-
-func TestParseTaskQuery_UnknownField(t *testing.T) {
-	// "foo:bar" is not a known field, so it becomes free text.
-	q := app.ParseTaskQuery("foo:bar")
-	assert.Empty(t, q.Fields)
-	assert.Equal(t, "foo:bar", q.FreeText)
-}
-
-func TestParseTaskQuery_PartialFieldNoValue(t *testing.T) {
-	// "status:" with no value should not produce a field filter.
-	q := app.ParseTaskQuery("status:")
-	assert.Empty(t, q.Fields)
-	assert.True(t, q.Empty())
-}
-
-func TestParseTaskQuery_CaseInsensitiveField(t *testing.T) {
-	q := app.ParseTaskQuery("Status:TODO")
-	require.Len(t, q.Fields, 1)
-	assert.Equal(t, "status", q.Fields[0].Field)
-	assert.Equal(t, "todo", q.Fields[0].Value)
-}
-
-func TestParseTaskQuery_MultiWordValueFollowedByField(t *testing.T) {
-	q := app.ParseTaskQuery("status:in progress priority:high")
-	require.Len(t, q.Fields, 2)
-	assert.Equal(t, "in progress", q.Fields[0].Value)
-	assert.Equal(t, "high", q.Fields[1].Value)
+			q := app.ParseTaskQuery(tt.input)
+			assert.Equal(t, tt.want, q.Fields)
+			assert.Equal(t, tt.wantFree, q.FreeText)
+			if tt.wantEmpty {
+				assert.True(t, q.Empty())
+			} else {
+				assert.Equal(t, len(tt.want) == 0 && tt.wantFree == "", q.Empty())
+			}
+		})
+	}
 }
 
 // ── FilterTasks ─────────────────────────────────────────────────────────────
 
-var testTasks = []app.TaskSummary{
-	{ID: "1", Name: "Fix authentication bug", Status: "todo", Priority: "high"},
-	{ID: "2", Name: "Update documentation", Status: "in progress", Priority: "normal"},
-	{ID: "3", Name: "Refactor auth module", Status: "todo", Priority: "normal"},
-	{ID: "4", Name: "Add login page", Status: "done", Priority: "low"},
-	{ID: "5", Name: "Write unit tests", Status: "todo", Priority: "high"},
+func makeTestTasks() []app.TaskSummary {
+	return []app.TaskSummary{
+		{ID: "1", Name: "Fix authentication bug", Status: "todo", Priority: "high"},
+		{ID: "2", Name: "Update documentation", Status: "in progress", Priority: "normal"},
+		{ID: "3", Name: "Refactor auth module", Status: "todo", Priority: "normal"},
+		{ID: "4", Name: "Add login page", Status: "done", Priority: "low"},
+		{ID: "5", Name: "Write unit tests", Status: "todo", Priority: "high"},
+	}
 }
 
 func TestFilterTasks_EmptyQuery(t *testing.T) {
-	result := app.FilterTasks(testTasks, app.TaskQuery{})
+	result := app.FilterTasks(makeTestTasks(), app.TaskQuery{})
 	assert.Nil(t, result, "empty query should return nil (show all)")
 }
 
 func TestFilterTasks_FieldMatchOnly(t *testing.T) {
 	q := app.ParseTaskQuery("status:todo")
-	result := app.FilterTasks(testTasks, q)
+	result := app.FilterTasks(makeTestTasks(), q)
 	require.Len(t, result, 3)
 	for _, r := range result {
 		assert.Equal(t, "todo", r.Status)
@@ -133,21 +152,21 @@ func TestFilterTasks_FieldMatchOnly(t *testing.T) {
 
 func TestFilterTasks_FieldMatchCaseInsensitive(t *testing.T) {
 	q := app.ParseTaskQuery("status:TODO")
-	result := app.FilterTasks(testTasks, q)
+	result := app.FilterTasks(makeTestTasks(), q)
 	require.Len(t, result, 3)
 }
 
 func TestFilterTasks_FieldSubstringMatch(t *testing.T) {
 	// "in progress" contains "progress"
 	q := app.ParseTaskQuery("status:progress")
-	result := app.FilterTasks(testTasks, q)
+	result := app.FilterTasks(makeTestTasks(), q)
 	require.Len(t, result, 1)
 	assert.Equal(t, "2", result[0].ID)
 }
 
 func TestFilterTasks_FuzzyMatchOnly(t *testing.T) {
 	q := app.ParseTaskQuery("auth")
-	result := app.FilterTasks(testTasks, q)
+	result := app.FilterTasks(makeTestTasks(), q)
 	require.NotEmpty(t, result)
 	// Should match "Fix authentication bug" and "Refactor auth module"
 	ids := make([]string, len(result))
@@ -160,7 +179,7 @@ func TestFilterTasks_FuzzyMatchOnly(t *testing.T) {
 
 func TestFilterTasks_FuzzyMatchOrdering(t *testing.T) {
 	q := app.ParseTaskQuery("auth")
-	result := app.FilterTasks(testTasks, q)
+	result := app.FilterTasks(makeTestTasks(), q)
 	require.NotEmpty(t, result)
 	// "Refactor auth module" should score higher than "Fix authentication bug"
 	// because "auth" is an exact substring in the name.
@@ -170,7 +189,7 @@ func TestFilterTasks_FuzzyMatchOrdering(t *testing.T) {
 func TestFilterTasks_CombinedFieldAndFuzzy(t *testing.T) {
 	// Free text before a field token: "auth status:todo"
 	q := app.ParseTaskQuery("auth status:todo")
-	result := app.FilterTasks(testTasks, q)
+	result := app.FilterTasks(makeTestTasks(), q)
 	require.NotEmpty(t, result)
 	for _, r := range result {
 		assert.Equal(t, "todo", r.Status)
@@ -186,19 +205,19 @@ func TestFilterTasks_CombinedFieldAndFuzzy(t *testing.T) {
 
 func TestFilterTasks_NoMatches(t *testing.T) {
 	q := app.ParseTaskQuery("zzzzz")
-	result := app.FilterTasks(testTasks, q)
+	result := app.FilterTasks(makeTestTasks(), q)
 	assert.Nil(t, result)
 }
 
 func TestFilterTasks_NoMatchesFieldFilter(t *testing.T) {
 	q := app.ParseTaskQuery("status:cancelled")
-	result := app.FilterTasks(testTasks, q)
+	result := app.FilterTasks(makeTestTasks(), q)
 	assert.Nil(t, result)
 }
 
 func TestFilterTasks_MultipleFieldFilters(t *testing.T) {
 	q := app.ParseTaskQuery("status:todo priority:high")
-	result := app.FilterTasks(testTasks, q)
+	result := app.FilterTasks(makeTestTasks(), q)
 	require.Len(t, result, 2)
 	for _, r := range result {
 		assert.Equal(t, "todo", r.Status)

@@ -16,6 +16,8 @@ type stubStore struct {
 	creds map[string]string
 }
 
+var _ auth.CredentialStore = (*stubStore)(nil)
+
 func newStubStore() *stubStore {
 	return &stubStore{creds: make(map[string]string)}
 }
@@ -72,4 +74,17 @@ func TestOAuthProvider_Authorize_ReturnsNotImplemented(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
 	err := o.Authorize(context.Background(), req)
 	assert.ErrorIs(t, err, auth.ErrOAuthNotImplemented)
+}
+
+func TestStaticTokenProvider_Method(t *testing.T) {
+	p := auth.NewStaticTokenProvider("pk_test_static")
+	assert.Equal(t, auth.MethodPersonalToken, p.Method())
+}
+
+func TestStaticTokenProvider_Authorize(t *testing.T) {
+	p := auth.NewStaticTokenProvider("pk_test_static")
+	req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
+
+	require.NoError(t, p.Authorize(context.Background(), req))
+	assert.Equal(t, "pk_test_static", req.Header.Get("Authorization"))
 }

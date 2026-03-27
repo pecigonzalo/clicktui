@@ -6,28 +6,24 @@ import (
 	"testing"
 
 	"github.com/rivo/tview"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pecigonzalo/clicktui/internal/app"
 )
 
-// ── helper: build a minimal TaskListPane for testing ─────────────────────────
-
-// newTestTaskListPane creates a TaskListPane with just enough wiring for
-// state-level tests. It does NOT require a running tview.Application.
-func newTestTaskListPane() *TaskListPane {
+func newTestTaskListPane(t *testing.T) *TaskListPane {
+	t.Helper()
 	table := tview.NewTable().
 		SetBorders(false).
 		SetSelectable(true, false).
 		SetFixed(1, 0)
 	table.SetBorder(true)
-
-	return &TaskListPane{
-		Table: table,
-	}
+	return &TaskListPane{Table: table}
 }
 
-// sampleTasks returns a small set of test tasks.
-func sampleTasks() []app.TaskSummary {
+func sampleTasks(t *testing.T) []app.TaskSummary {
+	t.Helper()
 	return []app.TaskSummary{
 		{ID: "t1", Name: "Fix login bug", Status: "in progress", StatusColor: "#1e90ff", Priority: "high", Parent: ""},
 		{ID: "t2", Name: "Add dark mode", Status: "todo", StatusColor: "#aaaaaa", Priority: "normal", Parent: ""},
@@ -37,272 +33,8 @@ func sampleTasks() []app.TaskSummary {
 	}
 }
 
-// ── SelectedTaskID ──────────────────────────────────────────────────────────
-
-func TestSelectedTaskID_ValidSelection(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sampleTasks()
-	tlp.render()
-
-	// Select the second data row (row 1 is header, row 2 is first task).
-	tlp.Select(2, 0)
-	got := tlp.SelectedTaskID()
-	if got != "t2" {
-		t.Errorf("SelectedTaskID() = %q, want 't2'", got)
-	}
-}
-
-func TestSelectedTaskID_HeaderSelected(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sampleTasks()
-	tlp.render()
-
-	// Row 0 is the header — should return empty.
-	tlp.Select(0, 0)
-	got := tlp.SelectedTaskID()
-	if got != "" {
-		t.Errorf("SelectedTaskID() at header = %q, want empty", got)
-	}
-}
-
-func TestSelectedTaskID_EmptyTaskList(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = nil
-	got := tlp.SelectedTaskID()
-	if got != "" {
-		t.Errorf("SelectedTaskID() with no tasks = %q, want empty", got)
-	}
-}
-
-// ── ApplyFilter / ClearFilter state transitions ─────────────────────────────
-
-func TestApplyFilter_SetsFilteredTasks(t *testing.T) {
-	tlp := newTestTaskListPane()
-	all := sampleTasks()
-	tlp.allTasks = all
-
-	filtered := []app.TaskSummary{all[0], all[2]} // only "in progress" tasks
-	query := app.TaskQuery{Fields: []app.FieldFilter{{Field: "status", Value: "in progress"}}}
-
-	tlp.ApplyFilter(filtered, query)
-
-	if len(tlp.tasks) != 2 {
-		t.Fatalf("ApplyFilter: tasks count = %d, want 2", len(tlp.tasks))
-	}
-	if tlp.tasks[0].ID != "t1" || tlp.tasks[1].ID != "t3" {
-		t.Errorf("ApplyFilter: tasks = %v, want [t1, t3]", taskIDs(tlp.tasks))
-	}
-	if tlp.activeQuery == nil {
-		t.Error("ApplyFilter: activeQuery should be non-nil after applying filter")
-	}
-}
-
-func TestApplyFilter_EmptyQuery_ShowsAll(t *testing.T) {
-	tlp := newTestTaskListPane()
-	all := sampleTasks()
-	tlp.allTasks = all
-	// Pre-set a filter.
-	tlp.activeQuery = &app.TaskQuery{FreeText: "something"}
-	tlp.tasks = all[:1]
-
-	// Empty query clears the filter.
-	tlp.ApplyFilter(nil, app.TaskQuery{})
-
-	if len(tlp.tasks) != len(all) {
-		t.Errorf("ApplyFilter(empty): tasks count = %d, want %d", len(tlp.tasks), len(all))
-	}
-	if tlp.activeQuery != nil {
-		t.Error("ApplyFilter(empty): activeQuery should be nil")
-	}
-}
-
-func TestClearFilter_RestoresAllTasks(t *testing.T) {
-	tlp := newTestTaskListPane()
-	all := sampleTasks()
-	tlp.allTasks = all
-	tlp.tasks = all[:2]
-	tlp.activeQuery = &app.TaskQuery{FreeText: "fix"}
-
-	tlp.ClearFilter()
-
-	if len(tlp.tasks) != len(all) {
-		t.Errorf("ClearFilter: tasks count = %d, want %d", len(tlp.tasks), len(all))
-	}
-	if tlp.activeQuery != nil {
-		t.Error("ClearFilter: activeQuery should be nil")
-	}
-}
-
-func TestApplyFilter_NilFiltered_SetsEmptySlice(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.allTasks = sampleTasks()
-
-	query := app.TaskQuery{FreeText: "zzz-no-match"}
-	tlp.ApplyFilter(nil, query)
-
-	if tlp.tasks != nil {
-		t.Errorf("ApplyFilter(nil, non-empty query): tasks should be nil, got %d items", len(tlp.tasks))
-	}
-	if tlp.activeQuery == nil {
-		t.Error("ApplyFilter: activeQuery should be non-nil")
-	}
-}
-
-// ── refreshCurrentTask state updates ────────────────────────────────────────
-
-func TestRefreshCurrentTask_UpdatesAllTasks(t *testing.T) {
-	tlp := newTestTaskListPane()
-	all := sampleTasks()
-	// Copy so we don't mutate the original.
-	allCopy := make([]app.TaskSummary, len(all))
-	copy(allCopy, all)
-	tlp.allTasks = allCopy
-	tlp.tasks = allCopy
-
-	tlp.refreshCurrentTask("t2", "done", "#00ff00")
-
-	// Verify allTasks was updated.
-	for _, task := range tlp.allTasks {
-		if task.ID == "t2" {
-			if task.Status != "done" {
-				t.Errorf("allTasks[t2].Status = %q, want 'done'", task.Status)
-			}
-			if task.StatusColor != "#00ff00" {
-				t.Errorf("allTasks[t2].StatusColor = %q, want '#00ff00'", task.StatusColor)
-			}
-			return
-		}
-	}
-	t.Error("task t2 not found in allTasks")
-}
-
-func TestRefreshCurrentTask_UpdatesDisplayedTasks(t *testing.T) {
-	tlp := newTestTaskListPane()
-	all := sampleTasks()
-	allCopy := make([]app.TaskSummary, len(all))
-	copy(allCopy, all)
-	tlp.allTasks = allCopy
-	tlp.tasks = allCopy
-	// No active filter — should update displayed tasks directly.
-	tlp.activeQuery = nil
-
-	tlp.refreshCurrentTask("t1", "review", "#ff6600")
-
-	found := false
-	for _, task := range tlp.tasks {
-		if task.ID == "t1" {
-			found = true
-			if task.Status != "review" {
-				t.Errorf("tasks[t1].Status = %q, want 'review'", task.Status)
-			}
-			break
-		}
-	}
-	if !found {
-		t.Error("task t1 not found in displayed tasks")
-	}
-}
-
-func TestRefreshCurrentTask_NonexistentTask(t *testing.T) {
-	tlp := newTestTaskListPane()
-	all := sampleTasks()
-	tlp.allTasks = make([]app.TaskSummary, len(all))
-	copy(tlp.allTasks, all)
-	tlp.tasks = tlp.allTasks
-
-	// Should not panic for a task ID that doesn't exist.
-	tlp.refreshCurrentTask("nonexistent", "done", "#00ff00")
-
-	// Verify nothing changed.
-	for i, task := range tlp.allTasks {
-		if task.Status != all[i].Status {
-			t.Errorf("allTasks[%d].Status changed from %q to %q; should be unchanged",
-				i, all[i].Status, task.Status)
-		}
-	}
-}
-
-// ── render ───────────────────────────────────────────────────────────────────
-
-func TestRender_HeaderRow(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sampleTasks()
-	tlp.render()
-
-	// Row 0 should be the header.
-	cell := tlp.GetCell(0, 0)
-	if cell == nil {
-		t.Fatal("render: header cell (0,0) is nil")
-	}
-	text := cell.Text
-	if text != "STATUS" {
-		t.Errorf("render: header cell (0,0) = %q, want 'STATUS'", text)
-	}
-
-	nameCell := tlp.GetCell(0, 1)
-	if nameCell == nil || nameCell.Text != "TASK NAME" {
-		t.Errorf("render: header cell (0,1) = %v, want 'TASK NAME'", nameCell)
-	}
-}
-
-func TestRender_TaskRowCount(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sampleTasks()
-	tlp.render()
-
-	// Should have 1 header + 5 task rows = row indices 0..5.
-	// Check that the last task row exists.
-	cell := tlp.GetCell(5, 1) // 5th task (0-indexed row 5)
-	if cell == nil {
-		t.Error("render: expected 5 task rows (row 5 should exist)")
-	}
-}
-
-func TestRender_SubtaskIndentation(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sampleTasks() // t4 has Parent="t1"
-	tlp.render()
-
-	// t4 is at index 3 (4th task), so row 4 (row 0 is header).
-	cell := tlp.GetCell(4, 1) // name column for t4
-	if cell == nil {
-		t.Fatal("render: subtask cell is nil")
-	}
-	text := stripTviewTags(cell.Text)
-	// Subtask should be indented with the SubtaskPrefix icon.
-	if text == "Update docs" {
-		t.Error("render: subtask should have indentation/prefix, got bare name")
-	}
-}
-
-func TestRender_EmptyTasks_NoPanic(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = nil
-	// Rendering an empty task list should not panic.
-	tlp.render()
-
-	// Header row should still exist.
-	cell := tlp.GetCell(0, 0)
-	if cell == nil {
-		t.Fatal("render with empty tasks: header cell should still exist")
-	}
-	if cell.Text != "STATUS" {
-		t.Errorf("render with empty tasks: header = %q, want 'STATUS'", cell.Text)
-	}
-}
-
-// ── helper ──────────────────────────────────────────────────────────────────
-
-func taskIDs(tasks []app.TaskSummary) []string {
-	ids := make([]string, len(tasks))
-	for i, t := range tasks {
-		ids[i] = t.ID
-	}
-	return ids
-}
-
-// sortableTasks returns tasks with PriorityOrder set for sorting tests.
-func sortableTasks() []app.TaskSummary {
+func sortableTasks(t *testing.T) []app.TaskSummary {
+	t.Helper()
 	return []app.TaskSummary{
 		{ID: "t1", Name: "Fix login bug", Status: "in progress", Priority: "high", PriorityOrder: 2, Parent: ""},
 		{ID: "t2", Name: "Add dark mode", Status: "todo", Priority: "normal", PriorityOrder: 3, Parent: ""},
@@ -312,270 +44,345 @@ func sortableTasks() []app.TaskSummary {
 	}
 }
 
-// ── Sort integration tests ──────────────────────────────────────────────────
+func taskIDs(t *testing.T, tasks []app.TaskSummary) []string {
+	t.Helper()
+	ids := make([]string, len(tasks))
+	for i, task := range tasks {
+		ids[i] = task.ID
+	}
+	return ids
+}
 
-func TestApplySortToTasks_NoSort(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tasks := sortableTasks()
-	tlp.tasks = make([]app.TaskSummary, len(tasks))
-	copy(tlp.tasks, tasks)
-	tlp.sortField = ""
+func TestSelectedTaskID_ValidSelection(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sampleTasks(t)
+	tlp.render()
+	tlp.Select(2, 0)
+	assert.Equal(t, "t2", tlp.SelectedTaskID())
+}
 
-	tlp.applySortToTasks()
+func TestSelectedTaskID_HeaderSelected(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sampleTasks(t)
+	tlp.render()
+	tlp.Select(0, 0)
+	assert.Empty(t, tlp.SelectedTaskID())
+}
 
-	// No sort — order should be unchanged.
-	got := taskIDs(tlp.tasks)
-	want := taskIDs(tasks)
-	for i := range got {
-		if got[i] != want[i] {
-			t.Errorf("applySortToTasks(no sort): tasks[%d].ID = %q, want %q", i, got[i], want[i])
+func TestSelectedTaskID_EmptyTaskList(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	assert.Empty(t, tlp.SelectedTaskID())
+}
+
+func TestApplyFilter_SetsFilteredTasks(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	all := sampleTasks(t)
+	tlp.allTasks = all
+
+	filtered := []app.TaskSummary{all[0], all[2]}
+	query := app.TaskQuery{Fields: []app.FieldFilter{{Field: "status", Value: "in progress"}}}
+	tlp.ApplyFilter(filtered, query)
+
+	require.Len(t, tlp.tasks, 2)
+	assert.Equal(t, []string{"t1", "t3"}, taskIDs(t, tlp.tasks))
+	assert.NotNil(t, tlp.activeQuery)
+}
+
+func TestApplyFilter_EmptyQuery_ShowsAll(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	all := sampleTasks(t)
+	tlp.allTasks = all
+	tlp.activeQuery = &app.TaskQuery{FreeText: "something"}
+	tlp.tasks = all[:1]
+
+	tlp.ApplyFilter(nil, app.TaskQuery{})
+
+	assert.Len(t, tlp.tasks, len(all))
+	assert.Nil(t, tlp.activeQuery)
+}
+
+func TestClearFilter_RestoresAllTasks(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	all := sampleTasks(t)
+	tlp.allTasks = all
+	tlp.tasks = all[:2]
+	tlp.activeQuery = &app.TaskQuery{FreeText: "fix"}
+
+	tlp.ClearFilter()
+
+	assert.Len(t, tlp.tasks, len(all))
+	assert.Nil(t, tlp.activeQuery)
+}
+
+func TestApplyFilter_NilFiltered_SetsEmptySlice(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tlp.allTasks = sampleTasks(t)
+
+	tlp.ApplyFilter(nil, app.TaskQuery{FreeText: "zzz-no-match"})
+
+	assert.Nil(t, tlp.tasks)
+	assert.NotNil(t, tlp.activeQuery)
+}
+
+func TestRefreshCurrentTask_UpdatesAllTasks(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	all := sampleTasks(t)
+	allCopy := append([]app.TaskSummary(nil), all...)
+	tlp.allTasks = allCopy
+	tlp.tasks = allCopy
+
+	tlp.refreshCurrentTask("t2", "done", "#00ff00")
+
+	for _, task := range tlp.allTasks {
+		if task.ID == "t2" {
+			assert.Equal(t, "done", task.Status)
+			assert.Equal(t, "#00ff00", task.StatusColor)
+			return
 		}
+	}
+	require.FailNow(t, "task t2 not found in allTasks")
+}
+
+func TestRefreshCurrentTask_UpdatesDisplayedTasks(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	allCopy := append([]app.TaskSummary(nil), sampleTasks(t)...)
+	tlp.allTasks = allCopy
+	tlp.tasks = allCopy
+
+	tlp.refreshCurrentTask("t1", "review", "#ff6600")
+
+	for _, task := range tlp.tasks {
+		if task.ID == "t1" {
+			assert.Equal(t, "review", task.Status)
+			return
+		}
+	}
+	require.FailNow(t, "task t1 not found in displayed tasks")
+}
+
+func TestRefreshCurrentTask_NonexistentTask(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	all := sampleTasks(t)
+	tlp.allTasks = append([]app.TaskSummary(nil), all...)
+	tlp.tasks = tlp.allTasks
+
+	tlp.refreshCurrentTask("nonexistent", "done", "#00ff00")
+
+	for i, task := range tlp.allTasks {
+		assert.Equal(t, all[i].Status, task.Status)
 	}
 }
 
+func TestRender_HeaderRow(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sampleTasks(t)
+	tlp.render()
+
+	require.NotNil(t, tlp.GetCell(0, 0))
+	assert.Equal(t, "STATUS", tlp.GetCell(0, 0).Text)
+	require.NotNil(t, tlp.GetCell(0, 1))
+	assert.Equal(t, "TASK NAME", tlp.GetCell(0, 1).Text)
+}
+
+func TestRender_TaskRowCount(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sampleTasks(t)
+	tlp.render()
+	assert.NotNil(t, tlp.GetCell(5, 1))
+}
+
+func TestRender_SubtaskIndentation(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sampleTasks(t)
+	tlp.render()
+
+	cell := tlp.GetCell(4, 1)
+	require.NotNil(t, cell)
+	assert.NotEqual(t, "Update docs", stripTviewTags(cell.Text))
+}
+
+func TestRender_EmptyTasks_NoPanic(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tlp.render()
+	require.NotNil(t, tlp.GetCell(0, 0))
+	assert.Equal(t, "STATUS", tlp.GetCell(0, 0).Text)
+}
+
+func TestApplySortToTasks_NoSort(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tasks := sortableTasks(t)
+	tlp.tasks = append([]app.TaskSummary(nil), tasks...)
+
+	tlp.applySortToTasks()
+
+	assert.Equal(t, taskIDs(t, tasks), taskIDs(t, tlp.tasks))
+}
+
 func TestApplySortToTasks_ByPriority(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tasks := sortableTasks()
-	tlp.tasks = make([]app.TaskSummary, len(tasks))
-	copy(tlp.tasks, tasks)
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = append([]app.TaskSummary(nil), sortableTasks(t)...)
 	tlp.sortField = app.SortFieldPriority
 	tlp.sortAsc = true
 
 	tlp.applySortToTasks()
 
-	// Ascending priority: urgent(1) < high(2) < normal(3) < low(4).
-	// t3(urgent) is a top-level, t1(high) has child t4(low), t5(high), t2(normal).
-	// Groups: [t3], [t1,t4], [t5], [t2].
-	// Sorted ascending: t3(1), t1(2)+t4, t5(2), t2(3).
-	got := taskIDs(tlp.tasks)
-	if got[0] != "t3" {
-		t.Errorf("applySortToTasks(priority asc): first task = %q, want t3 (urgent)", got[0])
-	}
-	// t4 should be right after its parent t1.
+	got := taskIDs(t, tlp.tasks)
+	require.NotEmpty(t, got)
+	assert.Equal(t, "t3", got[0])
 	for i, id := range got {
-		if id == "t1" && i+1 < len(got) && got[i+1] != "t4" {
-			t.Errorf("applySortToTasks(priority asc): t4 should follow t1, got %v", got)
+		if id == "t1" && i+1 < len(got) {
+			assert.Equal(t, "t4", got[i+1])
 		}
 	}
 }
 
 func TestApplySortToTasks_NilTasks(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = nil
+	tlp := newTestTaskListPane(t)
 	tlp.sortField = app.SortFieldName
 	tlp.sortAsc = true
-
-	// Should not panic.
 	tlp.applySortToTasks()
-
-	if tlp.tasks != nil {
-		t.Errorf("applySortToTasks(nil tasks): expected nil, got %d items", len(tlp.tasks))
-	}
+	assert.Nil(t, tlp.tasks)
 }
 
 func TestSortIndicator(t *testing.T) {
-	cases := []struct {
+	tests := []struct {
 		name      string
 		sortField string
 		sortAsc   bool
 		want      string
 	}{
-		{"no_sort", "", true, ""},
-		{"ascending_priority", app.SortFieldPriority, true, "↑priority"},
-		{"descending_name", app.SortFieldName, false, "↓name"},
-		{"ascending_status", app.SortFieldStatus, true, "↑status"},
+		{name: "no_sort", sortField: "", sortAsc: true, want: ""},
+		{name: "ascending_priority", sortField: app.SortFieldPriority, sortAsc: true, want: "↑priority"},
+		{name: "descending_name", sortField: app.SortFieldName, sortAsc: false, want: "↓name"},
+		{name: "ascending_status", sortField: app.SortFieldStatus, sortAsc: true, want: "↑status"},
 	}
-	for _, tc := range cases {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tlp := newTestTaskListPane()
+			t.Parallel()
+			tlp := newTestTaskListPane(t)
 			tlp.sortField = tc.sortField
 			tlp.sortAsc = tc.sortAsc
-			got := tlp.sortIndicator()
-			if got != tc.want {
-				t.Errorf("sortIndicator() = %q, want %q", got, tc.want)
-			}
+			assert.Equal(t, tc.want, tlp.sortIndicator())
 		})
 	}
 }
 
 func TestCycleSortField_NoApp(t *testing.T) {
-	// cycleSortField without a wired App should not panic (just no persistence).
-	tlp := newTestTaskListPane()
-	tlp.allTasks = sortableTasks()
-	tlp.tasks = make([]app.TaskSummary, len(tlp.allTasks))
-	copy(tlp.tasks, tlp.allTasks)
-	tlp.sortField = ""
+	tlp := newTestTaskListPane(t)
+	tlp.allTasks = sortableTasks(t)
+	tlp.tasks = append([]app.TaskSummary(nil), tlp.allTasks...)
 
-	// First cycle: none → status.
 	tlp.cycleSortField()
 
-	if tlp.sortField != app.SortFieldStatus {
-		t.Errorf("cycleSortField: sortField = %q, want %q", tlp.sortField, app.SortFieldStatus)
-	}
-	if !tlp.sortAsc {
-		t.Error("cycleSortField: sortAsc should be true after cycling to new field")
-	}
+	assert.Equal(t, app.SortFieldStatus, tlp.sortField)
+	assert.True(t, tlp.sortAsc)
 }
 
 func TestToggleSortDirection_NoApp(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.allTasks = sortableTasks()
-	tlp.tasks = make([]app.TaskSummary, len(tlp.allTasks))
-	copy(tlp.tasks, tlp.allTasks)
+	tlp := newTestTaskListPane(t)
+	tlp.allTasks = sortableTasks(t)
+	tlp.tasks = append([]app.TaskSummary(nil), tlp.allTasks...)
 	tlp.sortField = app.SortFieldPriority
 	tlp.sortAsc = true
 
 	tlp.toggleSortDirection()
 
-	if tlp.sortAsc {
-		t.Error("toggleSortDirection: sortAsc should be false after toggle")
-	}
+	assert.False(t, tlp.sortAsc)
 }
 
 func TestToggleSortDirection_NoOp_WhenNoSort(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.sortField = ""
+	tlp := newTestTaskListPane(t)
 	tlp.sortAsc = false
 
 	tlp.toggleSortDirection()
 
-	// No sort field — direction should stay unchanged.
-	if tlp.sortAsc {
-		t.Error("toggleSortDirection: should be no-op when sortField is empty")
-	}
+	assert.False(t, tlp.sortAsc)
 }
 
 func TestReapplyFilter_WithSort(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tasks := sortableTasks()
-	tlp.allTasks = make([]app.TaskSummary, len(tasks))
-	copy(tlp.allTasks, tasks)
+	tlp := newTestTaskListPane(t)
+	tlp.allTasks = append([]app.TaskSummary(nil), sortableTasks(t)...)
 	tlp.sortField = app.SortFieldName
 	tlp.sortAsc = true
 
 	tlp.reapplyFilter()
 
-	// With sort by name ascending, first task should be alphabetically first.
-	// Groups (top-level): t2("Add dark mode"), t5("Deploy to staging"),
-	// t1("Fix login bug")+t4, t3("Write tests").
-	got := taskIDs(tlp.tasks)
-	if got[0] != "t2" {
-		t.Errorf("reapplyFilter+sort(name asc): first = %q, want t2 ('Add dark mode')", got[0])
-	}
+	got := taskIDs(t, tlp.tasks)
+	require.NotEmpty(t, got)
+	assert.Equal(t, "t2", got[0])
 }
 
 func TestRestoreSelectionByID_Found(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sortableTasks()
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sortableTasks(t)
 	tlp.render()
 
 	tlp.restoreSelectionByID("t3")
 
 	row, _ := tlp.GetSelection()
-	// t3 is at index 2 (0-indexed), so row = 3 (1-indexed + header).
-	if row != 3 {
-		t.Errorf("restoreSelectionByID('t3'): selected row = %d, want 3", row)
-	}
+	assert.Equal(t, 3, row)
 }
 
 func TestRestoreSelectionByID_NotFound(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sortableTasks()
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sortableTasks(t)
 	tlp.render()
-	// Select row 4 before restore.
 	tlp.Select(4, 0)
 
 	tlp.restoreSelectionByID("nonexistent")
 
-	// Should fall back to row 1 (first data row).
 	row, _ := tlp.GetSelection()
-	if row != 1 {
-		t.Errorf("restoreSelectionByID(nonexistent): selected row = %d, want 1", row)
-	}
+	assert.Equal(t, 1, row)
 }
 
 func TestRestoreSelectionByID_Empty(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sortableTasks()
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sortableTasks(t)
 	tlp.render()
 	tlp.Select(3, 0)
 
-	// Empty ID — should be a no-op (selection stays where it is).
 	tlp.restoreSelectionByID("")
 
 	row, _ := tlp.GetSelection()
-	if row != 3 {
-		t.Errorf("restoreSelectionByID(''): selected row = %d, want 3 (unchanged)", row)
-	}
+	assert.Equal(t, 3, row)
 }
 
-// ── selectTaskByID ────────────────────────────────────────────────────────────
-
 func TestSelectTaskByID_Found(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sampleTasks()
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sampleTasks(t)
 	tlp.render()
 
 	found := tlp.selectTaskByID("t3")
 
-	if !found {
-		t.Error("selectTaskByID('t3') = false, want true")
-	}
-	// t3 is at index 2, so row 3 (index + 1 for header).
+	assert.True(t, found)
 	row, _ := tlp.GetSelection()
-	if row != 3 {
-		t.Errorf("selectTaskByID('t3'): selected row = %d, want 3", row)
-	}
+	assert.Equal(t, 3, row)
 }
 
 func TestSelectTaskByID_NotFound(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sampleTasks()
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sampleTasks(t)
 	tlp.render()
-
-	found := tlp.selectTaskByID("does-not-exist")
-
-	if found {
-		t.Error("selectTaskByID('does-not-exist') = true, want false")
-	}
+	assert.False(t, tlp.selectTaskByID("does-not-exist"))
 }
 
 func TestSelectTaskByID_EmptyID(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = sampleTasks()
+	tlp := newTestTaskListPane(t)
+	tlp.tasks = sampleTasks(t)
 	tlp.render()
-
-	found := tlp.selectTaskByID("")
-
-	if found {
-		t.Error("selectTaskByID('') = true, want false")
-	}
+	assert.False(t, tlp.selectTaskByID(""))
 }
 
 func TestSelectTaskByID_EmptyTaskList(t *testing.T) {
-	tlp := newTestTaskListPane()
-	tlp.tasks = nil
-
-	found := tlp.selectTaskByID("t1")
-
-	if found {
-		t.Error("selectTaskByID with no tasks = true, want false")
-	}
+	tlp := newTestTaskListPane(t)
+	assert.False(t, tlp.selectTaskByID("t1"))
 }
 
-// ── errTaskNameRequired validator ─────────────────────────────────────────────
-
 func TestErrTaskNameRequired_Sentinel(t *testing.T) {
-	if errTaskNameRequired == nil {
-		t.Fatal("errTaskNameRequired must not be nil")
-	}
-	if errTaskNameRequired.Error() == "" {
-		t.Error("errTaskNameRequired.Error() is empty; should have a non-empty message")
-	}
+	assert.NotNil(t, errTaskNameRequired)
 }
 
 func TestErrTaskNameRequired_BlankInputs(t *testing.T) {
-	// The validator used in startCreateFlow: strings.TrimSpace(s) == "" → error.
 	validate := func(s string) error {
 		if strings.TrimSpace(s) == "" {
 			return errTaskNameRequired
@@ -583,85 +390,40 @@ func TestErrTaskNameRequired_BlankInputs(t *testing.T) {
 		return nil
 	}
 
-	cases := []struct {
+	tests := []struct {
 		name    string
 		input   string
 		wantErr bool
 	}{
-		{"empty", "", true},
-		{"spaces_only", "   ", true},
-		{"tab_only", "\t", true},
-		{"valid_name", "My Task", false},
-		{"trimmed_name", "  hello  ", false},
+		{name: "empty", input: "", wantErr: true},
+		{name: "spaces_only", input: "   ", wantErr: true},
+		{name: "tab_only", input: "\t", wantErr: true},
+		{name: "valid_name", input: "My Task", wantErr: false},
+		{name: "trimmed_name", input: "  hello  ", wantErr: false},
 	}
-	for _, tc := range cases {
+
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := validate(tc.input)
-			if tc.wantErr && err == nil {
-				t.Errorf("validate(%q) = nil, want errTaskNameRequired", tc.input)
+			if tc.wantErr {
+				require.ErrorIs(t, err, errTaskNameRequired)
+				return
 			}
-			if !tc.wantErr && err != nil {
-				t.Errorf("validate(%q) = %v, want nil", tc.input, err)
-			}
+			assert.NoError(t, err)
 		})
 	}
 }
 
-// ── priorityOptions structure ─────────────────────────────────────────────────
-
 func TestPriorityOptions_Structure(t *testing.T) {
-	if len(priorityOptions) == 0 {
-		t.Fatal("priorityOptions must not be empty")
-	}
+	require.NotEmpty(t, priorityOptions)
+	require.Equal(t, "0", priorityOptions[0].Value)
+	require.NotEmpty(t, priorityOptions[0].Label)
 
-	// The first option must be the "skip" entry (value "0").
-	if priorityOptions[0].Value != "0" {
-		t.Errorf("priorityOptions[0].Value = %q, want '0' (skip/no priority)", priorityOptions[0].Value)
-	}
-	if priorityOptions[0].Label == "" {
-		t.Error("priorityOptions[0].Label is empty; skip option must have a label")
-	}
-
-	// Expect exactly the four ClickUp priority levels plus the skip entry.
 	wantValues := []string{"0", "1", "2", "3", "4"}
-	if len(priorityOptions) != len(wantValues) {
-		t.Fatalf("priorityOptions count = %d, want %d", len(priorityOptions), len(wantValues))
-	}
+	require.Len(t, priorityOptions, len(wantValues))
 	for i, want := range wantValues {
-		if priorityOptions[i].Value != want {
-			t.Errorf("priorityOptions[%d].Value = %q, want %q", i, priorityOptions[i].Value, want)
-		}
-		if priorityOptions[i].Label == "" {
-			t.Errorf("priorityOptions[%d].Label is empty", i)
-		}
+		assert.Equal(t, want, priorityOptions[i].Value)
+		assert.NotEmpty(t, priorityOptions[i].Label)
 	}
-}
-
-// ── inputHandler 'c' key — no list selected ───────────────────────────────────
-
-func TestInputHandler_CreateKey_NoListSelected_NoPanic(t *testing.T) {
-	tlp := newTestTaskListPane()
-	// currentID is "" — no list selected.
-	tlp.currentID = ""
-	// tuiApp is nil — ensure the handler does not attempt UI operations that
-	// require a live App when there is no list selected (early return).
-	// The handler sets an error footer and returns nil; since tuiApp is nil
-	// we just verify it does not panic (the nil-guard is in the handler's
-	// conditional that checks currentID first).
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("inputHandler 'c' with no list selected panicked: %v", r)
-		}
-	}()
-
-	// We cannot call inputHandler directly without a valid tuiApp for the
-	// setError path. Instead we test the guard condition directly: the handler
-	// checks tlp.currentID == "" before accessing tlp.tuiApp, so no nil
-	// dereference can occur.
-	if tlp.currentID != "" {
-		t.Error("precondition failed: currentID should be empty for this test")
-	}
-	// If createFlowPickStatus were called with an empty listID it would still
-	// be a no-op because the API call requires a non-empty list ID.
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pecigonzalo/clicktui/internal/app"
 )
@@ -15,25 +17,19 @@ import (
 func TestTagColor_HexColor(t *testing.T) {
 	c := tcell.NewHexColor(0xff8800)
 	got := tagColor(c)
-	if got != "[#ff8800]" {
-		t.Errorf("tagColor(%v) = %q, want %q", c, got, "[#ff8800]")
-	}
+	assert.Equal(t, "[#ff8800]", got)
 }
 
 func TestTagColor_DefaultColor_FallsBack(t *testing.T) {
 	c := tcell.ColorDefault // RGB returns (-1,-1,-1)
 	got := tagColor(c)
-	if got != "[white]" {
-		t.Errorf("tagColor(Default) = %q, want %q", got, "[white]")
-	}
+	assert.Equal(t, "[white]", got)
 }
 
 func TestTagColor_NamedColorWithRGB(t *testing.T) {
 	// DodgerBlue has well-known RGB values: (30, 144, 255)
 	got := tagColor(tcell.ColorDodgerBlue)
-	if !strings.HasPrefix(got, "[#") || !strings.HasSuffix(got, "]") {
-		t.Errorf("tagColor(DodgerBlue) = %q, want hex tag", got)
-	}
+	assert.True(t, strings.HasPrefix(got, "[#") && strings.HasSuffix(got, "]"))
 }
 
 func TestHexByte(t *testing.T) {
@@ -48,9 +44,7 @@ func TestHexByte(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := hexByte(tt.v)
-		if got != tt.want {
-			t.Errorf("hexByte(%#x) = %q, want %q", tt.v, got, tt.want)
-		}
+		assert.Equal(t, tt.want, got)
 	}
 }
 
@@ -70,9 +64,7 @@ func TestPriorityColor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := priorityColor(tt.priority)
-		if got != tt.want {
-			t.Errorf("priorityColor(%q) = %v, want %v", tt.priority, got, tt.want)
-		}
+		assert.Equal(t, tt.want, got)
 	}
 }
 
@@ -92,17 +84,11 @@ func TestPrioritySymbol(t *testing.T) {
 	for _, tt := range tests {
 		got := prioritySymbol(tt.priority)
 		runeCount := len([]rune(got))
-		if runeCount != tt.wantRunes {
-			t.Errorf("prioritySymbol(%q) has %d runes, want %d (got %q)", tt.priority, runeCount, tt.wantRunes, got)
-		}
+		assert.Equal(t, tt.wantRunes, runeCount)
 	}
 	// Spot-check values.
-	if got := prioritySymbol("urgent"); !strings.Contains(got, "!") {
-		t.Errorf("prioritySymbol(urgent) = %q, expected to contain '!'", got)
-	}
-	if got := prioritySymbol("low"); strings.Contains(got, "!") {
-		t.Errorf("prioritySymbol(low) = %q, should not contain '!'", got)
-	}
+	assert.True(t, strings.Contains(prioritySymbol("urgent"), "!"))
+	assert.False(t, strings.Contains(prioritySymbol("low"), "!"))
 }
 
 // ── nodeKindSymbol ────────────────────────────────────────────────────────────
@@ -117,24 +103,17 @@ func TestNodeKindSymbol(t *testing.T) {
 	seen := make(map[string]bool)
 	for _, k := range kinds {
 		sym := nodeKindSymbol(k, false)
-		if sym == "" {
-			t.Errorf("nodeKindSymbol(%v, false) returned empty string", k)
-		}
-		if seen[sym] {
-			t.Errorf("nodeKindSymbol(%v, false) = %q collides with another kind", k, sym)
-		}
+		require.NotEmpty(t, sym)
+		assert.False(t, seen[sym])
 		seen[sym] = true
 	}
 
 	// Folder expanded vs collapsed should return different symbols.
 	closedSym := nodeKindSymbol(app.NodeFolder, false)
 	openSym := nodeKindSymbol(app.NodeFolder, true)
-	if closedSym == "" || openSym == "" {
-		t.Error("folder symbols must not be empty")
-	}
-	if closedSym == openSym {
-		t.Errorf("folder open (%q) and closed (%q) symbols should differ", openSym, closedSym)
-	}
+	require.NotEmpty(t, closedSym)
+	require.NotEmpty(t, openSym)
+	assert.NotEqual(t, closedSym, openSym)
 }
 
 // ── nodeColor ─────────────────────────────────────────────────────────────────
@@ -148,8 +127,6 @@ func TestNodeColor_AllKinds(t *testing.T) {
 	}
 	for _, k := range kinds {
 		c := nodeColor(k)
-		if c == tcell.ColorDefault {
-			t.Errorf("nodeColor(%v) returned ColorDefault — expected a real colour", k)
-		}
+		assert.NotEqual(t, tcell.ColorDefault, c)
 	}
 }

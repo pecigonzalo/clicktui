@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,6 +43,7 @@ func TestSortTasks_ByName(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := app.SortTasks(makeTasks(), "name", tc.asc, nil)
 			assert.Equal(t, tc.want, ids(result))
 		})
@@ -60,6 +62,7 @@ func TestSortTasks_ByPriority(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := app.SortTasks(makeTasks(), "priority", tc.asc, nil)
 			assert.Equal(t, tc.want, ids(result))
 		})
@@ -78,6 +81,7 @@ func TestSortTasks_ByDueDate(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := app.SortTasks(makeTasks(), "due_date", tc.asc, nil)
 			assert.Equal(t, tc.want, ids(result))
 		})
@@ -96,6 +100,7 @@ func TestSortTasks_ByAssignee(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := app.SortTasks(makeTasks(), "assignee", tc.asc, nil)
 			assert.Equal(t, tc.want, ids(result))
 		})
@@ -119,6 +124,7 @@ func TestSortTasks_ByStatus_WithOrder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := app.SortTasks(makeTasks(), "status", tc.asc, statusOrder)
 			assert.Equal(t, tc.want, ids(result))
 		})
@@ -263,7 +269,8 @@ func TestNextSortField(t *testing.T) {
 		{"unknown", "status"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.current+"_to_"+tc.want, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%q to %q", tc.current, tc.want), func(t *testing.T) {
+			t.Parallel()
 			got := app.NextSortField(tc.current)
 			assert.Equal(t, tc.want, got)
 		})

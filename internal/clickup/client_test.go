@@ -101,52 +101,37 @@ func TestAuthorizedUser_Success(t *testing.T) {
 	assert.Equal(t, "alice@example.com", user.Email)
 }
 
-func TestAuthorizedUser_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
+func TestAuthorizedUser_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		token  string
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`, token: "bad_token"},
+		{name: "forbidden", status: http.StatusForbidden, body: `{"err":"Forbidden"}`, token: "pk_test"},
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`, token: "pk_test"},
+	}
 
-	client := newTestClient(t, "bad_token", srv)
-	_, err := client.AuthorizedUser(context.Background())
-	require.Error(t, err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
-}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
 
-func TestAuthorizedUser_Forbidden(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"err":"Forbidden"}`))
-	}))
-	defer srv.Close()
+			client := newTestClient(t, tc.token, srv)
+			_, err := client.AuthorizedUser(context.Background())
+			require.Error(t, err)
 
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.AuthorizedUser(context.Background())
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 403, apiErr.StatusCode)
-}
-
-func TestAuthorizedUser_RateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.AuthorizedUser(context.Background())
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 429, apiErr.StatusCode)
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
 }
 
 func TestTeams_Success(t *testing.T) {
@@ -168,36 +153,36 @@ func TestTeams_Success(t *testing.T) {
 	assert.Equal(t, "My Workspace", teams[0].Name)
 }
 
-func TestTeams_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
+func TestTeams_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		token  string
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`, token: "bad_token"},
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`, token: "pk_test"},
+	}
 
-	client := newTestClient(t, "bad_token", srv)
-	_, err := client.Teams(context.Background())
-	require.Error(t, err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
-}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
 
-func TestTeams_RateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
-	}))
-	defer srv.Close()
+			client := newTestClient(t, tc.token, srv)
+			_, err := client.Teams(context.Background())
+			require.Error(t, err)
 
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.Teams(context.Background())
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 429, apiErr.StatusCode)
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
 }
 
 func TestListStatuses_Success(t *testing.T) {
@@ -226,52 +211,37 @@ func TestListStatuses_Success(t *testing.T) {
 	assert.Equal(t, "done", statuses[2].Status)
 }
 
-func TestListStatuses_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"err":"List not found"}`))
-	}))
-	defer srv.Close()
+func TestListStatuses_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		listID string
+	}{
+		{name: "not_found", status: http.StatusNotFound, body: `{"err":"List not found"}`, listID: "missing"},
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`, listID: "l1"},
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`, listID: "l1"},
+	}
 
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.ListStatuses(context.Background(), "missing")
-	require.Error(t, err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 404, apiErr.StatusCode)
-}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
 
-func TestListStatuses_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
+			client := newTestClient(t, "pk_test", srv)
+			_, err := client.ListStatuses(context.Background(), tc.listID)
+			require.Error(t, err)
 
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.ListStatuses(context.Background(), "l1")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
-}
-
-func TestListStatuses_RateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.ListStatuses(context.Background(), "l1")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 429, apiErr.StatusCode)
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
 }
 
 func TestUpdateTaskStatus_Success(t *testing.T) {
@@ -280,7 +250,7 @@ func TestUpdateTaskStatus_Success(t *testing.T) {
 		assert.Equal(t, http.MethodPut, r.Method)
 
 		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "in progress", body["status"])
 
 		w.Header().Set("Content-Type", "application/json")
@@ -304,68 +274,39 @@ func TestUpdateTaskStatus_Success(t *testing.T) {
 	assert.Equal(t, "in progress", task.Status.Status)
 }
 
-func TestUpdateTaskStatus_InvalidStatus(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"err":"Invalid status value"}`))
-	}))
-	defer srv.Close()
+func TestUpdateTaskStatus_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		token  string
+		value  string
+	}{
+		{name: "bad_request", status: http.StatusBadRequest, body: `{"err":"Invalid status value"}`, token: "pk_test", value: "not_a_real_status"},
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`, token: "bad_token", value: "done"},
+		{name: "forbidden", status: http.StatusForbidden, body: `{"err":"Forbidden"}`, token: "pk_test", value: "done"},
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`, token: "pk_test", value: "done"},
+	}
 
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.UpdateTaskStatus(context.Background(), "t1", "not_a_real_status")
-	require.Error(t, err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 400, apiErr.StatusCode)
-}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
 
-func TestUpdateTaskStatus_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
+			client := newTestClient(t, tc.token, srv)
+			_, err := client.UpdateTaskStatus(context.Background(), "t1", tc.value)
+			require.Error(t, err)
 
-	client := newTestClient(t, "bad_token", srv)
-	_, err := client.UpdateTaskStatus(context.Background(), "t1", "done")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
-}
-
-func TestUpdateTaskStatus_Forbidden(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"err":"Forbidden"}`))
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.UpdateTaskStatus(context.Background(), "t1", "done")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 403, apiErr.StatusCode)
-}
-
-func TestUpdateTaskStatus_RateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.UpdateTaskStatus(context.Background(), "t1", "done")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 429, apiErr.StatusCode)
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
 }
 
 func TestMoveTaskToList_Success(t *testing.T) {
@@ -499,7 +440,7 @@ func TestUpdateTask_Success(t *testing.T) {
 		assert.Equal(t, http.MethodPut, r.Method)
 
 		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "Updated name", body["name"])
 		assert.Equal(t, "Updated description", body["description"])
 
@@ -534,11 +475,15 @@ func TestUpdateTask_WithAssignees(t *testing.T) {
 		assert.Equal(t, http.MethodPut, r.Method)
 
 		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assignees, ok := body["assignees"].(map[string]any)
-		require.True(t, ok, "assignees field should be an object")
+		if !assert.True(t, ok, "assignees field should be an object") {
+			return
+		}
 		add, ok := assignees["add"].([]any)
-		require.True(t, ok)
+		if !assert.True(t, ok) {
+			return
+		}
 		assert.Len(t, add, 1)
 		assert.Equal(t, float64(42), add[0])
 
@@ -558,36 +503,37 @@ func TestUpdateTask_WithAssignees(t *testing.T) {
 	require.NotNil(t, task)
 }
 
-func TestUpdateTask_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"err":"Task not found"}`))
-	}))
-	defer srv.Close()
+func TestUpdateTask_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		token  string
+		taskID string
+	}{
+		{name: "not_found", status: http.StatusNotFound, body: `{"err":"Task not found"}`, token: "pk_test", taskID: "missing"},
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`, token: "bad_token", taskID: "t1"},
+	}
 
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.UpdateTask(context.Background(), "missing", clickup.UpdateTaskRequest{})
-	require.Error(t, err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 404, apiErr.StatusCode)
-}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
 
-func TestUpdateTask_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
+			client := newTestClient(t, tc.token, srv)
+			_, err := client.UpdateTask(context.Background(), tc.taskID, clickup.UpdateTaskRequest{})
+			require.Error(t, err)
 
-	client := newTestClient(t, "bad_token", srv)
-	_, err := client.UpdateTask(context.Background(), "t1", clickup.UpdateTaskRequest{})
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
 }
 
 func TestCreateTask_Success(t *testing.T) {
@@ -596,7 +542,7 @@ func TestCreateTask_Success(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 
 		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "New task", body["name"])
 		assert.Equal(t, "open", body["status"])
 		assert.Equal(t, "Some description", body["description"])
@@ -633,10 +579,12 @@ func TestCreateTask_WithAssigneesAndPriority(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 
 		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, float64(2), body["priority"])
 		assignees, ok := body["assignees"].([]any)
-		require.True(t, ok)
+		if !assert.True(t, ok) {
+			return
+		}
 		assert.Len(t, assignees, 2)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -658,36 +606,36 @@ func TestCreateTask_WithAssigneesAndPriority(t *testing.T) {
 	assert.Equal(t, "new-t2", task.ID)
 }
 
-func TestCreateTask_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
+func TestCreateTask_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		token  string
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`, token: "bad_token"},
+		{name: "rate_limit", status: http.StatusTooManyRequests, body: `{"err":"Rate limit exceeded"}`, token: "pk_test"},
+	}
 
-	client := newTestClient(t, "bad_token", srv)
-	_, err := client.CreateTask(context.Background(), "l1", clickup.CreateTaskRequest{Name: "Task"})
-	require.Error(t, err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
-}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
 
-func TestCreateTask_RateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"err":"Rate limit exceeded"}`))
-	}))
-	defer srv.Close()
+			client := newTestClient(t, tc.token, srv)
+			_, err := client.CreateTask(context.Background(), "l1", clickup.CreateTaskRequest{Name: "Task"})
+			require.Error(t, err)
 
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.CreateTask(context.Background(), "l1", clickup.CreateTaskRequest{Name: "Task"})
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 429, apiErr.StatusCode)
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
 }
 
 func TestListMembers_Success(t *testing.T) {
@@ -743,34 +691,35 @@ func TestListMembers_Empty(t *testing.T) {
 	assert.Empty(t, members)
 }
 
-func TestListMembers_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"err":"List not found"}`))
-	}))
-	defer srv.Close()
+func TestListMembers_ErrorStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		token  string
+		listID string
+	}{
+		{name: "not_found", status: http.StatusNotFound, body: `{"err":"List not found"}`, token: "pk_test", listID: "missing"},
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"err":"Token invalid"}`, token: "bad_token", listID: "l1"},
+	}
 
-	client := newTestClient(t, "pk_test", srv)
-	_, err := client.ListMembers(context.Background(), "missing")
-	require.Error(t, err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 404, apiErr.StatusCode)
-}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
 
-func TestListMembers_Unauthorized(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"err":"Token invalid"}`))
-	}))
-	defer srv.Close()
+			client := newTestClient(t, tc.token, srv)
+			_, err := client.ListMembers(context.Background(), tc.listID)
+			require.Error(t, err)
 
-	client := newTestClient(t, "bad_token", srv)
-	_, err := client.ListMembers(context.Background(), "l1")
-	require.Error(t, err)
-
-	var apiErr *clickup.APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, 401, apiErr.StatusCode)
+			var apiErr *clickup.APIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+		})
+	}
 }

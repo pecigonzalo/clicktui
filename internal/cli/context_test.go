@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pecigonzalo/clicktui/internal/config"
 )
 
@@ -29,16 +32,12 @@ func writeTestConfig(t *testing.T, content string) {
 	// Determine where config.Load() will look by calling the real path helper
 	// after redirecting the env vars.
 	cfgPath, err := config.ConfigFilePath()
-	if err != nil {
-		t.Fatalf("writeTestConfig: ConfigFilePath: %v", err)
-	}
+	require.NoError(t, err)
 
-	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
-		t.Fatalf("writeTestConfig: mkdir: %v", err)
-	}
-	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
-		t.Fatalf("writeTestConfig: write: %v", err)
-	}
+	err = os.MkdirAll(filepath.Dir(cfgPath), 0o700)
+	require.NoError(t, err)
+	err = os.WriteFile(cfgPath, []byte(content), 0o600)
+	require.NoError(t, err)
 }
 
 func TestResolveProfile(t *testing.T) {
@@ -157,58 +156,29 @@ profiles: {}
 
 			got := ResolveProfile(tc.profileFlagValue, tc.profileChanged)
 
-			if got.Profile != tc.wantProfile {
-				t.Errorf("ResolveProfile(%q, %v).Profile = %q, want %q",
-					tc.profileFlagValue, tc.profileChanged, got.Profile, tc.wantProfile)
-			}
-			if got.WorkspaceID != tc.wantWorkspaceID {
-				t.Errorf("ResolveProfile(%q, %v).WorkspaceID = %q, want %q",
-					tc.profileFlagValue, tc.profileChanged, got.WorkspaceID, tc.wantWorkspaceID)
-			}
-			if got.SpaceID != tc.wantSpaceID {
-				t.Errorf("ResolveProfile(%q, %v).SpaceID = %q, want %q",
-					tc.profileFlagValue, tc.profileChanged, got.SpaceID, tc.wantSpaceID)
-			}
-			if got.ListID != tc.wantListID {
-				t.Errorf("ResolveProfile(%q, %v).ListID = %q, want %q",
-					tc.profileFlagValue, tc.profileChanged, got.ListID, tc.wantListID)
-			}
+			assert.Equal(t, tc.wantProfile, got.Profile)
+			assert.Equal(t, tc.wantWorkspaceID, got.WorkspaceID)
+			assert.Equal(t, tc.wantSpaceID, got.SpaceID)
+			assert.Equal(t, tc.wantListID, got.ListID)
 		})
 	}
 }
 
-// TestNewTaskCmd_Help verifies that the task command registers correctly on root.
-func TestNewTaskCmd_Help(t *testing.T) {
+// TestNewTaskCmd_Registration verifies that task command and alias register on root.
+func TestNewTaskCmd_Registration(t *testing.T) {
 	root := New()
 	root.SetOut(os.Stdout)
 
 	// Walk the registered commands to find "task".
-	var found bool
+	var taskCmdFound bool
+	var aliasFound bool
 	for _, cmd := range root.Commands() {
 		if cmd.Name() == "task" {
-			found = true
+			taskCmdFound = true
+			aliasFound = cmd.HasAlias("tasks")
 			break
 		}
 	}
-	if !found {
-		t.Error("expected 'task' command to be registered on root, but it was not found")
-	}
-}
-
-// TestNewTaskCmd_Alias verifies that the "tasks" alias is registered.
-func TestNewTaskCmd_Alias(t *testing.T) {
-	root := New()
-
-	var found bool
-	for _, cmd := range root.Commands() {
-		if cmd.Name() == "task" {
-			if cmd.HasAlias("tasks") {
-				found = true
-			}
-			break
-		}
-	}
-	if !found {
-		t.Error("expected 'task' command to have alias 'tasks'")
-	}
+	assert.True(t, taskCmdFound, "expected 'task' command to be registered on root")
+	assert.True(t, aliasFound, "expected 'task' command to have alias 'tasks'")
 }

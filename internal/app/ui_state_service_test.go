@@ -131,7 +131,7 @@ func TestSetSortPreference_SaveError_ReturnsError(t *testing.T) {
 
 	err := svc.SetSortPreference("default", "status", true)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "save config")
+	assert.ErrorContains(t, err, "save config")
 }
 
 func TestSetSortPreference_LoadError_ReturnsError(t *testing.T) {
@@ -140,7 +140,7 @@ func TestSetSortPreference_LoadError_ReturnsError(t *testing.T) {
 
 	err := svc.SetSortPreference("default", "status", true)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load config")
+	assert.ErrorContains(t, err, "load config")
 }
 
 // ── Profile isolation ─────────────────────────────────────────────────────────
@@ -277,7 +277,7 @@ func TestAddBookmark_LoadError_ReturnsError(t *testing.T) {
 
 	err := svc.AddBookmark("default", newBookmark("t1", "Task 1", "l1", "List 1"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load config")
+	assert.ErrorContains(t, err, "load config")
 }
 
 func TestAddBookmark_SaveError_ReturnsError(t *testing.T) {
@@ -287,7 +287,7 @@ func TestAddBookmark_SaveError_ReturnsError(t *testing.T) {
 
 	err := svc.AddBookmark("default", newBookmark("t1", "Task 1", "l1", "List 1"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "save config")
+	assert.ErrorContains(t, err, "save config")
 }
 
 // ── RemoveBookmark ────────────────────────────────────────────────────────────
@@ -332,7 +332,7 @@ func TestRemoveBookmark_LoadError_ReturnsError(t *testing.T) {
 
 	err := svc.RemoveBookmark("default", "t1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "load config")
+	assert.ErrorContains(t, err, "load config")
 }
 
 // ── IsBookmarked ──────────────────────────────────────────────────────────────
