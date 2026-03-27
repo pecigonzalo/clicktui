@@ -247,14 +247,40 @@ func TestBuildFields_AllPopulated(t *testing.T) {
 	tdp.buildFields(d)
 
 	require.Len(t, tdp.fields, 10)
+	// fields[0] = Task ID
 	assert.Equal(t, "Task ID", tdp.fields[0].label)
 	assert.Equal(t, fieldCopy, tdp.fields[0].kind)
-	assert.Equal(t, "URL", tdp.fields[2].label)
-	assert.Equal(t, fieldOpen, tdp.fields[2].kind)
+	// fields[1] = Custom ID
+	assert.Equal(t, "Custom ID", tdp.fields[1].label)
+	assert.Equal(t, fieldCopy, tdp.fields[1].kind)
+	// fields[2] = Assignees
+	assert.Equal(t, "Assignees", tdp.fields[2].label)
+	assert.Equal(t, fieldEdit, tdp.fields[2].kind)
+	assert.Equal(t, editTypeAssignee, tdp.fields[2].edit)
+	// fields[3] = Due Date
 	assert.Equal(t, "Due Date", tdp.fields[3].label)
 	assert.Equal(t, fieldEdit, tdp.fields[3].kind)
 	assert.Equal(t, editTypeDate, tdp.fields[3].edit)
 	assert.True(t, tdp.fields[3].hasValue)
+	// fields[4] = Start Date
+	assert.Equal(t, "Start Date", tdp.fields[4].label)
+	assert.Equal(t, fieldEdit, tdp.fields[4].kind)
+	assert.Equal(t, editTypeDate, tdp.fields[4].edit)
+	assert.True(t, tdp.fields[4].hasValue)
+	// fields[5] = Parent
+	assert.Equal(t, "Parent", tdp.fields[5].label)
+	assert.Equal(t, fieldNavigate, tdp.fields[5].kind)
+	// fields[6] = sub1 subtask
+	assert.Equal(t, fieldNavigate, tdp.fields[6].kind)
+	// fields[7] = sub2 subtask
+	assert.Equal(t, fieldNavigate, tdp.fields[7].kind)
+	// fields[8] = URL
+	assert.Equal(t, "URL", tdp.fields[8].label)
+	assert.Equal(t, fieldOpen, tdp.fields[8].kind)
+	// fields[9] = Description
+	assert.Equal(t, "Description", tdp.fields[9].label)
+	assert.Equal(t, fieldEdit, tdp.fields[9].kind)
+	assert.Equal(t, editTypeTextArea, tdp.fields[9].edit)
 }
 
 func TestBuildFields_EditableFieldsAlwaysPresent(t *testing.T) {
@@ -291,8 +317,10 @@ func TestBuildFields_SubtasksIncluded(t *testing.T) {
 	d := &app.TaskDetail{ID: "task1", Subtasks: []app.SubtaskSummary{{ID: "s1", Name: "Sub One"}, {ID: "s2", Name: "Sub Two"}, {ID: "s3", Name: "Sub Three"}}}
 	tdp.buildFields(d)
 
+	// Task ID + Assignees + Due Date + Start Date + 3 subtasks + Description = 8
 	require.Len(t, tdp.fields, 8)
-	for _, f := range tdp.fields[5:] {
+	// Subtasks occupy indices 4, 5, 6 (after Task ID, Assignees, Due Date, Start Date)
+	for _, f := range tdp.fields[4:7] {
 		assert.Equal(t, fieldNavigate, f.kind)
 	}
 }

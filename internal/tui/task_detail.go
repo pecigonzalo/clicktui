@@ -1198,14 +1198,16 @@ func (td *TaskDetailPane) buildFields(d *app.TaskDetail) {
 			hasValue: true,
 		})
 	}
-	if d.URL != "" {
-		td.fields = append(td.fields, selectableField{
-			label:    "URL",
-			value:    d.URL,
-			kind:     fieldOpen,
-			hasValue: true,
-		})
-	}
+
+	// Editable: assignees — always present so the user can set them when empty.
+	assigneeDisplay := strings.Join(d.Assignees, ", ")
+	td.fields = append(td.fields, selectableField{
+		label:    "Assignees",
+		value:    assigneeDisplay,
+		kind:     fieldEdit,
+		edit:     editTypeAssignee,
+		hasValue: len(d.Assignees) > 0,
+	})
 
 	// Editable: due date — always present so the user can set it when empty.
 	td.fields = append(td.fields, selectableField{
@@ -1234,25 +1236,6 @@ func (td *TaskDetailPane) buildFields(d *app.TaskDetail) {
 		})
 	}
 
-	// Editable: description — always present so the user can set it when empty.
-	td.fields = append(td.fields, selectableField{
-		label:    "Description",
-		value:    d.Description,
-		kind:     fieldEdit,
-		edit:     editTypeTextArea,
-		hasValue: d.Description != "",
-	})
-
-	// Editable: assignees — always present so the user can set them when empty.
-	assigneeDisplay := strings.Join(d.Assignees, ", ")
-	td.fields = append(td.fields, selectableField{
-		label:    "Assignees",
-		value:    assigneeDisplay,
-		kind:     fieldEdit,
-		edit:     editTypeAssignee,
-		hasValue: len(d.Assignees) > 0,
-	})
-
 	for _, st := range d.Subtasks {
 		td.fields = append(td.fields, selectableField{
 			label:    icons.SubtaskPrefix + " " + st.Name,
@@ -1261,4 +1244,22 @@ func (td *TaskDetailPane) buildFields(d *app.TaskDetail) {
 			hasValue: true,
 		})
 	}
+
+	if d.URL != "" {
+		td.fields = append(td.fields, selectableField{
+			label:    "URL",
+			value:    d.URL,
+			kind:     fieldOpen,
+			hasValue: true,
+		})
+	}
+
+	// Editable: description — always present so the user can set it when empty.
+	td.fields = append(td.fields, selectableField{
+		label:    "Description",
+		value:    d.Description,
+		kind:     fieldEdit,
+		edit:     editTypeTextArea,
+		hasValue: d.Description != "",
+	})
 }
