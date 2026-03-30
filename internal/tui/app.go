@@ -95,6 +95,16 @@ type App struct {
 
 // New creates a TUI application wired to the given services.
 func New(hierarchy *app.HierarchyService, tasks *app.TaskService, uiState *app.UIStateService, profile string, logger *slog.Logger, opts LaunchOptions) *App {
+	// Use rounded corners for all borders.
+	tview.Borders.TopLeft = '╭'
+	tview.Borders.TopRight = '╮'
+	tview.Borders.BottomLeft = '╰'
+	tview.Borders.BottomRight = '╯'
+	tview.Borders.TopLeftFocus = '╭'
+	tview.Borders.TopRightFocus = '╮'
+	tview.Borders.BottomLeftFocus = '╰'
+	tview.Borders.BottomRightFocus = '╯'
+
 	a := &App{
 		tviewApp:     tview.NewApplication(),
 		hierarchy:    hierarchy,
