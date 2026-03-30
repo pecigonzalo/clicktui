@@ -335,3 +335,26 @@ func TestBuildFields_ResetsBetweenCalls(t *testing.T) {
 	assert.NotEqual(t, first, second)
 	assert.Equal(t, 5, second)
 }
+
+func TestEditDescription_NoEditor_FallsBackToTextareaModal(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
+	a := &App{
+		tviewApp: tview.NewApplication(),
+		pages:    tview.NewPages(),
+		footer:   newFooter(),
+	}
+
+	td := &TaskDetailPane{
+		TextView: tview.NewTextView(),
+		tuiApp:   a,
+		taskID:   "task-1",
+		listID:   "list-1",
+	}
+
+	td.editDescription(selectableField{label: "Description", value: "original"})
+
+	assert.True(t, a.IsModalActive())
+	assert.True(t, a.pages.HasPage(pageTextAreaModal))
+}

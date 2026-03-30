@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -682,21 +683,36 @@ func (td *TaskDetailPane) applyDateUpdate(taskID, listID string, isDueDate bool,
 	}()
 }
 
-// editDescription opens a textarea modal for the description field.
+// editDescription opens an external editor when configured; otherwise it
+// falls back to the textarea modal.
 func (td *TaskDetailPane) editDescription(f selectableField) {
 	taskID := td.taskID
 	listID := td.listID
+	argv := resolveEditor()
+	if argv == nil {
+		ShowTextAreaModal(td.tuiApp, TextAreaModalConfig{
+			Title:   " Edit Description ",
+			Initial: f.value,
+			OnSubmit: func(text string) {
+				td.applyDescriptionUpdate(taskID, listID, text)
+			},
+			OnCancel: func() {
+				td.tuiApp.footer.SetStatusReady("Edit cancelled")
+			},
+		})
+		return
+	}
 
-	ShowTextAreaModal(td.tuiApp, TextAreaModalConfig{
-		Title:   " Edit Description ",
-		Initial: f.value,
-		OnSubmit: func(text string) {
-			td.applyDescriptionUpdate(taskID, listID, text)
-		},
-		OnCancel: func() {
-			td.tuiApp.footer.SetStatusReady("Edit cancelled")
-		},
-	})
+	newContent, err := openInEditor(td.tuiApp.tviewApp, f.value)
+	switch {
+	case errors.Is(err, errUnchanged):
+		td.tuiApp.footer.SetStatusReady("No changes.")
+		return
+	case err != nil:
+		td.tuiApp.footer.SetStatusReady(fmt.Sprintf("Editor error: %v", err))
+		return
+	}
+	td.applyDescriptionUpdate(taskID, listID, newContent)
 }
 
 // applyDescriptionUpdate calls UpdateTask with the new description and refreshes.
