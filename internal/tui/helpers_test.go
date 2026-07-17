@@ -1,7 +1,18 @@
 // Package tui — shared test helpers.
 package tui
 
-import "strings"
+import (
+	"log/slog"
+	"strings"
+	"testing"
+)
+
+// testLogger returns a *slog.Logger that discards all output, for
+// constructing a real *App in tests without a Discard target of its own.
+func testLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+	return slog.New(slog.DiscardHandler)
+}
 
 // stripTviewTags removes tview colour/style tags (e.g. "[red]", "[#rrggbb]", "[-]")
 // from a string so we can assert on visible text only.

@@ -17,6 +17,8 @@ import (
 var knownFields = map[string]func(TaskSummary) string{
 	"status":   func(t TaskSummary) string { return t.Status },
 	"priority": func(t TaskSummary) string { return t.Priority },
+	"assignee": func(t TaskSummary) string { return t.Assignee },
+	"due":      func(t TaskSummary) string { return t.DueDate }, // YYYY-MM-DD; substring match supports "due:2026-05" for a month
 }
 
 // FieldFilter represents a single key:value filter predicate.

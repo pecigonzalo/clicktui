@@ -36,6 +36,12 @@ type TaskListPane struct {
 	sortField   string         // current sort field ("" = no sort)
 	sortAsc     bool           // sort direction
 	statusOrder map[string]int // status name → position; populated from list statuses
+
+	// onLoadComplete is a one-shot callback fired (then cleared) the next time
+	// fetchPage finishes loading all pages, success or error. Used by
+	// refreshSilently to restore the selection after a background reload
+	// without threading a callback through fetchPage's recursive pagination.
+	onLoadComplete func()
 }
 
 // NewTaskListPane creates an empty task list table.
@@ -88,6 +94,7 @@ func (tlp *TaskListPane) fetchPage() {
 				tlp.tuiApp.logger.Error("load tasks", "list", tlp.currentID, "error", err)
 				tlp.tuiApp.setError("load tasks: %v", err)
 				tlp.showEmpty(fmt.Sprintf("Error loading tasks: %v", err))
+				tlp.clearLoadComplete()
 				return
 			}
 			if tlp.page == 0 {
@@ -115,8 +122,49 @@ func (tlp *TaskListPane) fetchPage() {
 			} else {
 				tlp.tuiApp.footer.SetStatusReady(fmt.Sprintf("%d tasks in %s", len(tlp.tasks), tlp.listName))
 			}
+			tlp.fireLoadComplete()
 		})
 	}()
+}
+
+// fireLoadComplete invokes and clears the pending onLoadComplete callback, if any.
+func (tlp *TaskListPane) fireLoadComplete() {
+	if tlp.onLoadComplete == nil {
+		return
+	}
+	cb := tlp.onLoadComplete
+	tlp.onLoadComplete = nil
+	cb()
+}
+
+// clearLoadComplete drops any pending onLoadComplete callback without invoking it.
+func (tlp *TaskListPane) clearLoadComplete() {
+	tlp.onLoadComplete = nil
+}
+
+// refreshSilently reloads the current list in the background without
+// disrupting the user: it's a no-op when nothing is loaded yet, a load is
+// already in flight, a modal is open, or a filter bar is being typed into.
+// The current selection is preserved by task ID (falling back to the first
+// row if that task no longer exists after the reload). This is what powers
+// the TUI's live auto-refresh — the same reload manual 'r' triggers, but on a
+// timer and without resetting your place in the list.
+func (tlp *TaskListPane) refreshSilently() {
+	if tlp.currentID == "" || tlp.isLoading {
+		return
+	}
+	if tlp.tuiApp.IsModalActive() || tlp.tuiApp.isFilterEditing() {
+		return
+	}
+
+	prevID := tlp.SelectedTaskID()
+	tlp.tuiApp.tasks.InvalidateTaskList(tlp.currentID)
+	tlp.allTasks = nil
+	tlp.page = 0
+	tlp.onLoadComplete = func() {
+		tlp.restoreSelectionByID(prevID)
+	}
+	tlp.fetchPage()
 }
 
 // SelectedTaskID returns the ID of the currently selected task, or "" when no

@@ -64,11 +64,32 @@ You can navigate directly to a specific location on startup using these flags:
 **Controls:**
 
 - `Tab`/`Shift+Tab` — cycle between panes (hierarchy, task list, details)
+- `↑`/`↓` or `j`/`k` — move selection / scroll (vim-style navigation works in
+  every pane)
 - `Enter` — expand tree nodes or select tasks
+- `:` — jump to any list by name, across all workspaces (command palette)
 - `s` — open status picker (task list or detail pane)
 - `m` — move the selected task to another list (detail pane)
-- `n` — load next page of tasks (task list pane)
+- `?` — show the full keybinding reference
 - `q` — quit
+
+The loaded task list also refreshes itself silently every 30 seconds — no
+key needed. It skips the refresh while a modal is open or you're typing into
+a filter, and always preserves your current selection, so it never yanks you
+back to the top of the list mid-review.
+
+### Filtering tasks
+
+Press `/` in the task list pane to filter. The query supports field filters
+combined with free-text fuzzy matching on the task name:
+
+- `status:<text>` — match status (substring, case-insensitive)
+- `priority:<text>` — match priority
+- `assignee:<text>` — match the first assignee
+- `due:<text>` — match due date, e.g. `due:2026-05` for a whole month
+- Anything else is fuzzy-matched against the task name
+
+Examples: `status:todo`, `assignee:alice due:2026-05`, `auth status:in progress`.
 
 ## Direct task commands
 

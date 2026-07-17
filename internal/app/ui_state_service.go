@@ -78,6 +78,67 @@ func (s *UIStateService) SetSortPreference(profile string, field string, ascendi
 	return nil
 }
 
+// MaxRecentAssignees caps how many recent-assignee IDs are persisted per profile.
+const MaxRecentAssignees = 5
+
+// RecordRecentAssignee moves userID to the front of the profile's
+// recent-assignee list (most-recent-first), de-duplicating and trimming to
+// MaxRecentAssignees. Returns an error when the profile does not exist or the
+// config cannot be saved.
+func (s *UIStateService) RecordRecentAssignee(profile string, userID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cfg, err := s.loader.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	p, err := cfg.Profile(profile)
+	if err != nil {
+		return fmt.Errorf("record recent assignee: %w", err)
+	}
+
+	updated := make([]int, 0, len(p.UIState.RecentAssignees)+1)
+	updated = append(updated, userID)
+	for _, id := range p.UIState.RecentAssignees {
+		if id != userID {
+			updated = append(updated, id)
+		}
+	}
+	if len(updated) > MaxRecentAssignees {
+		updated = updated[:MaxRecentAssignees]
+	}
+	p.UIState.RecentAssignees = updated
+
+	if err := s.loader.Save(cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	return nil
+}
+
+// GetRecentAssignees returns the persisted recent-assignee user IDs for the
+// named profile, most-recent first. Returns nil when the profile cannot be
+// loaded or none have been recorded.
+func (s *UIStateService) GetRecentAssignees(profile string) []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cfg, err := s.loader.Load()
+	if err != nil {
+		return nil
+	}
+	p, err := cfg.Profile(profile)
+	if err != nil {
+		return nil
+	}
+	if len(p.UIState.RecentAssignees) == 0 {
+		return nil
+	}
+	out := make([]int, len(p.UIState.RecentAssignees))
+	copy(out, p.UIState.RecentAssignees)
+	return out
+}
+
 // GetBookmarks returns a copy of the bookmark list for the named profile.
 // Returns nil when the profile does not exist or cannot be loaded.
 func (s *UIStateService) GetBookmarks(profile string) []config.Bookmark {

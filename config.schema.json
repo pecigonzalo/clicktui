@@ -68,6 +68,13 @@
           "items": {
             "$ref": "#/$defs/bookmark"
           }
+        },
+        "recent_assignees": {
+          "type": "array",
+          "description": "Most-recently assigned ClickUp user IDs, most-recent first, used to rank the assignee picker.",
+          "items": {
+            "type": "integer"
+          }
         }
       },
       "additionalProperties": false

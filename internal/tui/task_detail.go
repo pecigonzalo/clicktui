@@ -768,6 +768,14 @@ func (td *TaskDetailPane) showAssigneeModal(taskID, listID string, currentIDs []
 		currentSet[id] = struct{}{}
 	}
 
+	// Surface recently-assigned members first so the common case (assigning
+	// the same few people over and over) doesn't require scanning the full
+	// list every time.
+	if td.tuiApp.uiState != nil {
+		recent := td.tuiApp.uiState.GetRecentAssignees(td.tuiApp.profile)
+		members = app.SortMembersByRecency(members, recent)
+	}
+
 	opts := make([]SelectOption, len(members))
 	for i, m := range members {
 		label := m.Username
@@ -847,6 +855,16 @@ func (td *TaskDetailPane) applyAssigneeUpdate(taskID, listID string, currentIDs 
 			td.tuiApp.tasks.InvalidateTaskList(listID)
 			td.tuiApp.taskList.reapplyFilter()
 			td.tuiApp.footer.SetStatusReady("Assignees updated")
+
+			// Best-effort: remember newly-added assignees so they rank first
+			// next time. Failure here shouldn't surface as an update error.
+			if td.tuiApp.uiState != nil {
+				for _, id := range add {
+					if err := td.tuiApp.uiState.RecordRecentAssignee(td.tuiApp.profile, id); err != nil {
+						td.tuiApp.logger.Error("record recent assignee", "user", id, "error", err)
+					}
+				}
+			}
 		})
 	}()
 }

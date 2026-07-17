@@ -415,6 +415,72 @@ func TestErrTaskNameRequired_BlankInputs(t *testing.T) {
 	}
 }
 
+// ── refreshSilently / onLoadComplete ─────────────────────────────────────────
+
+func TestFireLoadComplete_InvokesAndClearsCallback(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	calls := 0
+	tlp.onLoadComplete = func() { calls++ }
+
+	tlp.fireLoadComplete()
+	assert.Equal(t, 1, calls)
+	assert.Nil(t, tlp.onLoadComplete)
+
+	// A second call is a no-op — nothing to invoke.
+	tlp.fireLoadComplete()
+	assert.Equal(t, 1, calls)
+}
+
+func TestFireLoadComplete_NilCallback_NoPanic(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	assert.NotPanics(t, func() { tlp.fireLoadComplete() })
+}
+
+func TestClearLoadComplete_DropsWithoutInvoking(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	calls := 0
+	tlp.onLoadComplete = func() { calls++ }
+
+	tlp.clearLoadComplete()
+	assert.Equal(t, 0, calls)
+	assert.Nil(t, tlp.onLoadComplete)
+}
+
+func TestRefreshSilently_NoOpWhenNothingLoaded(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tlp.currentID = ""
+	// tuiApp is nil — reaching past the guard would panic dereferencing it,
+	// so NotPanics here proves the empty-currentID guard short-circuits.
+	assert.NotPanics(t, func() { tlp.refreshSilently() })
+}
+
+func TestRefreshSilently_NoOpWhenAlreadyLoading(t *testing.T) {
+	tlp := newTestTaskListPane(t)
+	tlp.currentID = "l1"
+	tlp.isLoading = true
+	assert.NotPanics(t, func() { tlp.refreshSilently() })
+}
+
+func TestRefreshSilently_NoOpWhenModalActive(t *testing.T) {
+	a := New(nil, nil, nil, "default", testLogger(t), LaunchOptions{})
+	a.SetModalActive(true)
+	a.taskList.currentID = "l1"
+
+	assert.NotPanics(t, func() { a.taskList.refreshSilently() })
+	// Guard returned before fetchPage ran, so isLoading was never set.
+	assert.False(t, a.taskList.isLoading)
+}
+
+func TestRefreshSilently_NoOpWhenFilterEditing(t *testing.T) {
+	a := New(nil, nil, nil, "default", testLogger(t), LaunchOptions{})
+	a.taskListFilter.Show()
+	require.True(t, a.isFilterEditing())
+	a.taskList.currentID = "l1"
+
+	assert.NotPanics(t, func() { a.taskList.refreshSilently() })
+	assert.False(t, a.taskList.isLoading)
+}
+
 func TestPriorityOptions_Structure(t *testing.T) {
 	require.NotEmpty(t, priorityOptions)
 	require.Equal(t, "0", priorityOptions[0].Value)

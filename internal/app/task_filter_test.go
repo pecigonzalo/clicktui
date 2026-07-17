@@ -230,6 +230,34 @@ func TestFilterTasks_EmptyInput(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+func TestFilterTasks_AssigneeField(t *testing.T) {
+	tasks := []app.TaskSummary{
+		{ID: "1", Name: "Fix bug", Assignee: "alice"},
+		{ID: "2", Name: "Write docs", Assignee: "bob"},
+		{ID: "3", Name: "Ship feature", Assignee: "alice"},
+	}
+	q := app.ParseTaskQuery("assignee:alice")
+	result := app.FilterTasks(tasks, q)
+	require.Len(t, result, 2)
+	for _, r := range result {
+		assert.Equal(t, "alice", r.Assignee)
+	}
+}
+
+func TestFilterTasks_DueField_SubstringMatchesMonth(t *testing.T) {
+	tasks := []app.TaskSummary{
+		{ID: "1", Name: "May task", DueDate: "2026-05-01"},
+		{ID: "2", Name: "May task 2", DueDate: "2026-05-20"},
+		{ID: "3", Name: "June task", DueDate: "2026-06-01"},
+	}
+	q := app.ParseTaskQuery("due:2026-05")
+	result := app.FilterTasks(tasks, q)
+	require.Len(t, result, 2)
+	for _, r := range result {
+		assert.Contains(t, r.DueDate, "2026-05")
+	}
+}
+
 func TestTaskQuery_Empty(t *testing.T) {
 	assert.True(t, app.TaskQuery{}.Empty())
 	assert.False(t, app.TaskQuery{FreeText: "x"}.Empty())

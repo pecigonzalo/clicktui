@@ -396,3 +396,67 @@ func TestBookmarks_ProfileIsolation(t *testing.T) {
 	assert.True(t, svc.IsBookmarked("work", "t1"))
 	assert.False(t, svc.IsBookmarked("personal", "t1"))
 }
+
+// ── Recent assignees ──────────────────────────────────────────────────────────
+
+func TestGetRecentAssignees_NoneRecorded_ReturnsNil(t *testing.T) {
+	svc := app.NewUIStateServiceWithLoader(newFakeLoader())
+	assert.Nil(t, svc.GetRecentAssignees("default"))
+}
+
+func TestRecordRecentAssignee_MostRecentFirst(t *testing.T) {
+	svc := app.NewUIStateServiceWithLoader(newFakeLoader())
+
+	require.NoError(t, svc.RecordRecentAssignee("default", 1))
+	require.NoError(t, svc.RecordRecentAssignee("default", 2))
+	require.NoError(t, svc.RecordRecentAssignee("default", 3))
+
+	assert.Equal(t, []int{3, 2, 1}, svc.GetRecentAssignees("default"))
+}
+
+func TestRecordRecentAssignee_ReRecordingMovesToFront(t *testing.T) {
+	svc := app.NewUIStateServiceWithLoader(newFakeLoader())
+
+	require.NoError(t, svc.RecordRecentAssignee("default", 1))
+	require.NoError(t, svc.RecordRecentAssignee("default", 2))
+	require.NoError(t, svc.RecordRecentAssignee("default", 1))
+
+	assert.Equal(t, []int{1, 2}, svc.GetRecentAssignees("default"), "re-recording an existing ID should move it to the front, not duplicate it")
+}
+
+func TestRecordRecentAssignee_CapsAtMax(t *testing.T) {
+	svc := app.NewUIStateServiceWithLoader(newFakeLoader())
+
+	for i := 1; i <= app.MaxRecentAssignees+3; i++ {
+		require.NoError(t, svc.RecordRecentAssignee("default", i))
+	}
+
+	got := svc.GetRecentAssignees("default")
+	assert.Len(t, got, app.MaxRecentAssignees)
+	// Most recently recorded ID is the last one added.
+	assert.Equal(t, app.MaxRecentAssignees+3, got[0])
+}
+
+func TestRecordRecentAssignee_ProfileNotFound_ReturnsError(t *testing.T) {
+	svc := app.NewUIStateServiceWithLoader(newFakeLoader())
+	assert.Error(t, svc.RecordRecentAssignee("does-not-exist", 1))
+}
+
+func TestGetRecentAssignees_LoadError_ReturnsNil(t *testing.T) {
+	loader := &fakeConfigLoader{loadErr: errors.New("disk error")}
+	svc := app.NewUIStateServiceWithLoader(loader)
+	assert.Nil(t, svc.GetRecentAssignees("default"))
+}
+
+func TestRecentAssignees_ProfileIsolation(t *testing.T) {
+	cfg := config.New()
+	cfg.SetProfile(&config.Profile{Name: "work", AuthMethod: config.AuthMethodPersonalToken})
+	cfg.SetProfile(&config.Profile{Name: "personal", AuthMethod: config.AuthMethodPersonalToken})
+	svc := app.NewUIStateServiceWithLoader(&fakeConfigLoader{cfg: cfg})
+
+	require.NoError(t, svc.RecordRecentAssignee("work", 10))
+	require.NoError(t, svc.RecordRecentAssignee("personal", 20))
+
+	assert.Equal(t, []int{10}, svc.GetRecentAssignees("work"))
+	assert.Equal(t, []int{20}, svc.GetRecentAssignees("personal"))
+}
