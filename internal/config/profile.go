@@ -42,6 +42,10 @@ type UIState struct {
 	SortAsc bool `yaml:"sort_ascending,omitempty" json:"sort_ascending,omitempty"`
 	// Bookmarks holds the user's locally-stored task bookmarks.
 	Bookmarks []Bookmark `yaml:"bookmarks,omitempty" json:"bookmarks,omitempty"`
+	// RecentAssignees tracks the most-recently assigned user IDs, most-recent
+	// first, capped at a small size. Used to surface likely candidates first
+	// in the assignee picker instead of an alphabetical/API-order list.
+	RecentAssignees []int `yaml:"recent_assignees,omitempty" json:"recent_assignees,omitempty"`
 }
 
 // Bookmark records a locally-bookmarked ClickUp task.

@@ -5,6 +5,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"sync"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/pecigonzalo/clicktui/internal/clickup"
 )
@@ -73,6 +76,13 @@ func (k NodeKind) String() string {
 // HierarchyService loads and caches the ClickUp workspace hierarchy.
 type HierarchyService struct {
 	api ClickUpAPI
+
+	// allLists caches the flattened cross-workspace list index used by the
+	// command palette. See LoadAllLists / InvalidateAllLists in list_index.go.
+	allListsMu     sync.Mutex
+	allLists       []ListRef
+	allListsLoaded bool
+	allListsGroup  singleflight.Group
 }
 
 // NewHierarchyService creates a HierarchyService backed by the given API.

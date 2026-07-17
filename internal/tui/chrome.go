@@ -131,17 +131,20 @@ func (f *Footer) SetStatusReady(msg string) {
 
 // SetHelp updates the right (keybinding) segment.  Pass a list of
 // "key:action" pairs; they are rendered as "[key] action  [key] action".
+// The split is on the LAST colon (not the first) so a key that is itself a
+// colon — the command-palette trigger — can be written as "::jump to list".
 func (f *Footer) SetHelp(pairs ...string) {
 	var sb strings.Builder
 	for i, pair := range pairs {
 		if i > 0 {
 			sb.WriteString("  ")
 		}
-		k, action, found := strings.Cut(pair, ":")
-		if !found {
+		idx := strings.LastIndex(pair, ":")
+		if idx < 0 {
 			sb.WriteString(pair)
 			continue
 		}
+		k, action := pair[:idx], pair[idx+1:]
 		sb.WriteString("[yellow]" + k + "[-]")
 		sb.WriteString(" " + action)
 	}

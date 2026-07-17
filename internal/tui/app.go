@@ -62,6 +62,7 @@ type App struct {
 	tree       *TreePane
 	taskList   *TaskListPane
 	taskDetail *TaskDetailPane
+	header     *Header
 	footer     *Footer
 	// paneStylers maps paneID to the chrome controller for that pane.
 	paneStylers [3]*PaneStyler
@@ -129,6 +130,8 @@ func (a *App) buildLayout() {
 	a.tree = NewTreePane(a)
 	a.taskList = NewTaskListPane(a)
 	a.taskDetail = NewTaskDetailPane(a)
+	a.header = newHeader()
+	a.header.SetProfile(a.profile)
 	a.footer = newFooter()
 
 	// Register pane chrome controllers so we can update focus styling.
@@ -231,6 +234,7 @@ func (a *App) buildLayout() {
 		AddItem(a.taskDetail, 0, 4, false)
 
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.header, 1, 0, false).
 		AddItem(a.panes, 0, 1, true).
 		AddItem(a.footer, 1, 0, false)
 
@@ -247,6 +251,7 @@ func (a *App) buildLayout() {
 		"Tab:next pane",
 		"Shift+Tab:prev pane",
 		"Enter:select",
+		"::jump to list",
 		"/:filter",
 		"S:sort",
 		"T:sort dir",
@@ -258,6 +263,7 @@ func (a *App) buildLayout() {
 		"B:bookmarks",
 		"r:reload",
 		"y:copy id",
+		"?:help",
 		"q:quit",
 	)
 
@@ -302,6 +308,12 @@ func (a *App) globalInputHandler(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		case 'B':
 			ShowBookmarksOverlay(a)
+			return nil
+		case '?':
+			ShowHelpOverlay(a)
+			return nil
+		case ':':
+			ShowCommandPalette(a)
 			return nil
 		}
 	}
@@ -442,6 +454,7 @@ func (a *App) restoreDefaultHelp() {
 		"Tab:next pane",
 		"Shift+Tab:prev pane",
 		"Enter:select",
+		"::jump to list",
 		"/:filter",
 		"S:sort",
 		"T:sort dir",
@@ -453,6 +466,7 @@ func (a *App) restoreDefaultHelp() {
 		"B:bookmarks",
 		"r:reload",
 		"y:copy id",
+		"?:help",
 		"q:quit",
 	)
 }
@@ -483,8 +497,33 @@ func (a *App) Run(ctx context.Context) error {
 	// Launch initial load in a background goroutine. The QueueUpdateDraw
 	// calls inside will block briefly until tviewApp.Run() starts below.
 	go a.initialLoad(ctx)
+	go a.autoRefreshLoop(ctx)
 
 	return a.tviewApp.Run()
+}
+
+// taskListAutoRefreshInterval is how often the loaded task list silently
+// reloads in the background — the TUI's equivalent of K9s's live "watch"
+// behaviour, scaled to ClickUp's polling API rather than a streaming one.
+const taskListAutoRefreshInterval = 30 * time.Second
+
+// autoRefreshLoop periodically triggers a silent task list reload until ctx
+// is cancelled. Only used by Run — RunHeadless is a one-shot dev/CI capture
+// tool and has no use for a background timer. Must be started as its own
+// goroutine; it blocks until ctx.Done().
+func (a *App) autoRefreshLoop(ctx context.Context) {
+	ticker := time.NewTicker(taskListAutoRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.taskList.refreshSilently()
+			})
+		}
+	}
 }
 
 // setStatusLoading shows a yellow loading message in the footer.
